@@ -62,7 +62,8 @@ def vol_adjusted_z(
             continue
         fwd = np.full(n, np.nan)
         fwd[: n - h] = np.log(c[h:] / c[: n - h])
-        z = fwd / (vol * math.sqrt(h))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z = fwd / (vol * math.sqrt(h))
         ok = np.isfinite(z)
         comp[ok] += w * z[ok]
         wsum[ok] += w

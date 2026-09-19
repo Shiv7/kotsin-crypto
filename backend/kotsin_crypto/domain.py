@@ -32,6 +32,7 @@ class ExitReason(StrEnum):
     DAILY_LOSS = "DAILY_LOSS"
     MANUAL = "MANUAL"
     END = "END"  # backtest range ended with the position open
+    POLICY = "POLICY"  # a learned exit policy chose to exit
 
 
 @dataclass(slots=True)
@@ -159,6 +160,10 @@ class Trade:
     closed_ts: float
     duration_s: float
     signal_id: str
+    r_unit: float = (
+        0.0  # |entry − initial stop| in price units (net R = net / (contracts × cv × r_unit))
+    )
+    contract_value: float = 0.0
 
 
 @dataclass(slots=True)

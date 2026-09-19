@@ -26,6 +26,8 @@ from ..risk.wallet import Wallet
 from ..strategy.base import Side, Signal, Strategy
 from ..strategy.can2 import Can2, Can2Config
 from ..strategy.keys import StrategyKey
+from .env import ACTIONS, compute_obs, stop_after_action
+from .rl.policies import policy_by_name
 
 FUNDING_INTERVAL_S = 8 * 3600
 
@@ -52,6 +54,10 @@ class BacktestConfig:
     default_slippage_bps: float = 2.0
     apply_funding: bool = True
     limits: Mapping[str, Any] = field(default_factory=dict)
+    # None → the hand R-ladder in risk/exits.py (default, byte-identical to before). Otherwise a
+    # policy name ("ladder", "hold_only") or an artefact JSON path: exits then follow
+    # research.env semantics (policy acts at each closed strategy-timeframe bar).
+    exit_policy: str | None = None
 
     def slip(self, symbol: str) -> float:
         return float(self.slippage_bps.get(symbol, self.default_slippage_bps))
@@ -96,6 +102,7 @@ class BacktestRunner:
         self.store = BarStore(cfg.symbols)
         self.ctx = _Ctx(self.store)
         self.exits = ExitEngine(self.limits)
+        self.exit_policy = policy_by_name(cfg.exit_policy) if cfg.exit_policy else None
         self.wallet = Wallet.new(self.strategy.key.value, cfg.initial_usd, now=cfg.start)
         self.positions: dict[str, Position] = {}
         self.pending: list[_Pending] = []
@@ -169,6 +176,9 @@ class BacktestRunner:
         # 4. bars → strategy
         self.last_close[sym] = bar.close
         for hb in self.store.add_1m(bar):
+            if hb.tf == self.cfg.tf and self.exit_policy is not None:
+                for pos in [p for p in self.positions.values() if p.symbol == sym]:
+                    self._policy_step(pos, hb, spec)
             if hb.tf == self.cfg.tf and hb.tf in self.strategy.timeframes:
                 for sig in self.strategy.on_bar(self.ctx, hb):
                     self._on_signal(sig, hb, spec)
@@ -277,10 +287,16 @@ class BacktestRunner:
                 "stop hit intrabar",
             )
             return
-        # then let the ratchet see the favourable extreme, and re-check against the close
         favourable = bar.high if long else bar.low
-        self.exits.on_mark(pos, favourable, bar.end_ts)
-        d = self.exits.on_mark(pos, bar.close, bar.end_ts)
+        if self.exit_policy is not None:
+            # a learned/explicit policy owns the stop; only track excursions here
+            pos.peak_r = max(pos.peak_r, pos.r_now(favourable))
+            pos.mfe_r = max(pos.mfe_r, pos.peak_r)
+            d = None
+        else:
+            # let the ratchet see the favourable extreme, and re-check against the close
+            self.exits.on_mark(pos, favourable, bar.end_ts)
+            d = self.exits.on_mark(pos, bar.close, bar.end_ts)
         if d is not None:
             self._close(
                 pos,
@@ -301,6 +317,39 @@ class BacktestRunner:
                 bar.end_ts,
                 t.note,
             )
+
+    def _policy_step(self, pos: Position, hb: UnifiedBar, spec: ProductSpec) -> None:
+        """One decision of the configured exit policy at a closed strategy-timeframe bar."""
+        assert self.exit_policy is not None
+        window = self.store.bars(pos.symbol, hb.tf, 49)
+        obs = compute_obs(
+            side=pos.direction,
+            entry=pos.entry,
+            r_unit=pos.r_unit,
+            peak_r=pos.peak_r,
+            bars_held=pos.bars_held,
+            window=window,
+        )
+        action = ACTIONS[self.exit_policy.act(obs)]
+        pos.bars_held += 1
+        long = pos.side is PosSide.LONG
+        if action == "exit_now":
+            self._close(
+                pos,
+                self._slipped(pos.symbol, hb.close, not long, pos.contracts, spec.contract_value),
+                ExitReason.POLICY,
+                hb.end_ts,
+                "policy exit",
+            )
+            return
+        pos.stop = stop_after_action(
+            action,
+            side=pos.direction,
+            entry=pos.entry,
+            r_unit=pos.r_unit,
+            stop=pos.stop,
+            peak_r=pos.peak_r,
+        )
 
     def _close(self, pos: Position, price: float, reason: ExitReason, ts: int, note: str) -> None:
         fee = self._fee(price, pos.contracts, pos.contract_value)
@@ -338,6 +387,8 @@ class BacktestRunner:
                 closed_ts=float(ts),
                 duration_s=float(ts - pos.opened_ts),
                 signal_id=pos.signal_id,
+                r_unit=pos.r_unit,
+                contract_value=pos.contract_value,
             )
         )
         del self.positions[pos.id]
@@ -421,6 +472,7 @@ def config_from_dict(d: Mapping[str, Any]) -> BacktestConfig:
         slippage_bps=dict(d.get("slippage_bps") or {"BTCUSD": 0.5, "ETHUSD": 1.0, "SOLUSD": 2.0}),
         default_slippage_bps=float(d.get("default_slippage_bps", 2.0)),
         apply_funding=bool(d.get("apply_funding", True)),
+        exit_policy=d.get("exit_policy") or None,
         limits=dict(d.get("limits") or {}),
     )
 

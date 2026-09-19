@@ -82,7 +82,14 @@ class TradeBarBuilder:
         b = self._cur
         b.high = max(b.high, price)
         b.low = min(b.low, price)
-        b.close = price
+        # Trades can arrive slightly out of time order (the venue publishes in batches); open and
+        # close follow TRADE time, not arrival order, so the bar equals the venue's own candle.
+        if b.first_ts_us is None or ts_us < b.first_ts_us:
+            b.open = price
+            b.first_ts_us = ts_us
+        if b.last_ts_us is None or ts_us >= b.last_ts_us:
+            b.close = price
+            b.last_ts_us = ts_us
         b.volume += size
         if taker_buy:
             b.buy_volume += size
@@ -91,7 +98,6 @@ class TradeBarBuilder:
         b.trade_count += 1
         self._pv += price * size
         b.vwap = self._pv / b.volume if b.volume else None
-        b.last_ts_us = ts_us
         return out
 
     def flush(self, now_s: float) -> list[TradeBar]:

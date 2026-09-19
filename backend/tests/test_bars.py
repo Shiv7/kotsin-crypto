@@ -88,3 +88,14 @@ def test_store_resamples_1m_into_utc_aligned_5m() -> None:
     assert (
         store.add_1m(merge_1m(tb.flush(base + 10 * 60)[0], None)) == [] or True
     )  # later minutes don't re-close
+
+
+def test_open_and_close_follow_trade_time_not_arrival_order() -> None:
+    b = TradeBarBuilder("BTCUSD")
+    t0 = 8_000_000 * M
+    b.on_trade(t0 + 10_000_000, 101.0, 1, True)  # arrives first, traded at +10 s
+    b.on_trade(t0 + 2_000_000, 100.0, 1, True)  # arrives second, traded at +2 s → the true open
+    b.on_trade(t0 + 50_000_000, 103.0, 1, True)
+    b.on_trade(t0 + 40_000_000, 102.0, 1, True)  # late arrival, traded before the +50 s one
+    out = b.flush((t0 + M) / 1e6 + 2)
+    assert len(out) == 1 and out[0].open == 100.0 and out[0].close == 103.0 and out[0].high == 103.0

@@ -115,6 +115,18 @@ export interface Control {
   halted: boolean
   halt_reason: string
   armed_until: number | null
+  armed?: boolean
+  live_available?: boolean
+}
+
+export interface LiveCaps {
+  symbols: string[]
+  max_contracts: number
+  max_positions: number
+  max_orders_per_day: number
+  daily_notional_usd: number
+  daily_loss_usd: number
+  leverage: number
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

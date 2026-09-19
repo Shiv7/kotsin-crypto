@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     delta_env: DeltaEnv = DeltaEnv.TESTNET
     delta_api_key: SecretStr | None = None
     delta_api_secret: SecretStr | None = None
+    delta_force_ipv4: bool = (
+        True  # one stable address to whitelist (the box also has rotating IPv6)
+    )
 
     symbols: str = "BTCUSD,ETHUSD,SOLUSD"
 
@@ -91,6 +94,17 @@ class Settings(BaseSettings):
     paper_initial_usd: float = 10_000.0  # dummy wallet per strategy in PAPER mode
     backfill_hours: float = 6.0  # 1m history seeded from REST at boot
 
+    # LIVE_CAPPED caps (real orders, tiny account). Mode itself is state in the control table (R9)
+    # and must be ARMED with an expiry; these only bound what an armed engine may do.
+    live_leverage: float = (
+        5.0  # set + verified per product before the first order (venue default 200×)
+    )
+    live_symbols: str = "BTCUSD,ETHUSD"  # SOLUSD's $110 contract does not fit a ~$25 account
+    live_max_contracts: int = 1  # per order
+    live_max_positions: int = 2  # concurrent
+    live_max_orders_per_day: int = 6
+    live_daily_loss_usd: float = 3.0  # entries halted for the UTC day below this realised P&L
+
     @field_validator("symbols")
     @classmethod
     def _symbols_nonempty(cls, v: str) -> str:
@@ -105,6 +119,10 @@ class Settings(BaseSettings):
     @property
     def endpoints(self) -> DeltaEndpoints:
         return ENDPOINTS[self.delta_env]
+
+    @property
+    def live_symbol_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.live_symbols.split(",") if s.strip()]
 
     @property
     def has_api_keys(self) -> bool:

@@ -397,19 +397,64 @@ def _reasons(res: Sequence[EpisodeResult]) -> dict[str, int]:
     return out
 
 
+def save_transitions(tr: Transitions, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path, obs_columns=np.array(OBS_COLUMNS), actions=np.array(ACTIONS), **tr.arrays()
+    )
+
+
+def build_dataset(
+    symbols: Sequence[str],
+    start: int,
+    end: int,
+    *,
+    history_root: Path,
+    out: Path,
+    seed: int = 0,
+    max_bars: int = 48,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Offline dataset only (no training): behaviour rollouts of every real CAN2 episode → .npz."""
+    cfg = Can2Config(**(params or {}))
+    bars5_by_symbol: dict[str, list[UnifiedBar]] = {}
+    episodes: list[ExitEpisode] = []
+    for sym in symbols:
+        b1 = load_cached_1m(sym, start, end, history_root)
+        if b1:
+            bars5_by_symbol[sym] = resample_5m(sym, b1)
+            episodes.extend(collect_episodes(sym, bars5_by_symbol[sym], cfg))
+    episodes.sort(key=lambda e: e.signal_ts)
+    tr = collect_transitions(bars5_by_symbol, episodes, seed=seed, max_bars=max_bars)
+    save_transitions(tr, out)
+    return {"episodes": len(episodes), "transitions": len(tr), "path": str(out)}
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    run = sub.add_parser("run")
-    run.add_argument("--symbols", default="BTCUSD,ETHUSD")
-    run.add_argument("--start", default="2025-06-01")
-    run.add_argument("--end", default="2026-09-19")
-    run.add_argument("--history", default="data/history")
-    run.add_argument("--out", default="data/rl")
-    run.add_argument("--folds", type=int, default=6)
-    run.add_argument("--seed", type=int, default=0)
-    run.add_argument("--k-surge", type=float, default=2.5)
+    for name in ("run", "dataset"):
+        p = sub.add_parser(name)
+        p.add_argument("--symbols", default="BTCUSD,ETHUSD")
+        p.add_argument("--start", default="2025-06-01")
+        p.add_argument("--end", default="2026-09-19")
+        p.add_argument("--history", default="data/history")
+        p.add_argument("--out", default="data/rl")
+        p.add_argument("--folds", type=int, default=6)
+        p.add_argument("--seed", type=int, default=0)
+        p.add_argument("--k-surge", type=float, default=2.5)
     a = ap.parse_args(argv)
+    if a.cmd == "dataset":
+        info = build_dataset(
+            a.symbols.split(","),
+            parse_day(a.start),
+            parse_day(a.end) + 86_400,
+            history_root=Path(a.history),
+            out=Path(a.out) / f"transitions_{a.start}_{a.end}.npz",
+            seed=a.seed,
+            params={"k_surge": a.k_surge},
+        )
+        print(json.dumps(info))
     if a.cmd == "run":
         art = experiment(
             a.symbols.split(","),

@@ -184,3 +184,23 @@ def test_collect_episodes_from_real_signals() -> None:
     bars5 = resample_5m("BTCUSD", _bars("BTCUSD", 900, event_at=300))
     eps = collect_episodes("BTCUSD", bars5, Can2Config(**PARAMS))
     assert len(eps) == 1 and eps[0].side == 1 and eps[0].r_unit > 0 and eps[0].entry_index == 61
+
+
+def test_dataset_npz_roundtrip_feeds_fqi(tmp_path: Path) -> None:
+    from kotsin_crypto.research.env import ACTIONS
+    from kotsin_crypto.research.features import resample_5m
+    from kotsin_crypto.research.rl.exit_policy import collect_transitions, save_transitions
+
+    bars5 = resample_5m("BTCUSD", _bars("BTCUSD", 900, event_at=300))
+    eps = collect_episodes("BTCUSD", bars5, Can2Config(**PARAMS))
+    tr = collect_transitions({"BTCUSD": bars5}, eps, seed=0, max_bars=12)
+    assert len(tr) >= 3  # three behaviour policies × at least one step each
+    path = tmp_path / "t.npz"
+    save_transitions(tr, path)
+    d = np.load(path)
+    assert list(d["obs_columns"]) == list(OBS_COLUMNS) and list(d["actions"]) == list(ACTIONS)
+    assert d["obs"].shape == (len(tr), len(OBS_COLUMNS)) and d["done"].sum() == 3
+    pol = fqi(
+        {k: d[k] for k in ("obs", "action", "reward", "next_obs", "done")}, n_iter=2, min_support=1
+    )
+    assert pol.meta["n_transitions"] == len(tr)

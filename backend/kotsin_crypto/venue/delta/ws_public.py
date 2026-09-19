@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import socket
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -45,10 +46,18 @@ def channels_for(symbols: list[str]) -> list[dict[str, Any]]:
 class DeltaPublicWS:
     SILENCE_TIMEOUT_S = 45.0
 
-    def __init__(self, url: str, channels: list[dict[str, Any]], on_message: OnMessage) -> None:
+    def __init__(
+        self,
+        url: str,
+        channels: list[dict[str, Any]],
+        on_message: OnMessage,
+        *,
+        force_ipv4: bool = True,
+    ) -> None:
         self.url = url
         self.channels = channels
         self.on_message = on_message
+        self.force_ipv4 = force_ipv4
         self.connected = False
         self.connect_ts: float | None = None
         self.reconnects = 0
@@ -65,7 +74,11 @@ class DeltaPublicWS:
         while not stop.is_set():
             try:
                 async with websockets.connect(
-                    self.url, max_size=16_000_000, ping_interval=None, open_timeout=15
+                    self.url,
+                    max_size=16_000_000,
+                    ping_interval=None,
+                    open_timeout=15,
+                    family=socket.AF_INET if self.force_ipv4 else 0,
                 ) as ws:
                     self.connected = True
                     self.connect_ts = time.time()

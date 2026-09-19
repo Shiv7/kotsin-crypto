@@ -3,8 +3,10 @@ control (mode / halt)."""
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -271,6 +273,47 @@ async def committee_labels(
             for i, b in enumerate(bars)
         ],
     }
+
+
+def _rl_dir(request: Request) -> Path:
+    return Path(request.app.state.settings.data_dir) / "rl"
+
+
+@router.get("/rl/runs")
+async def rl_runs(request: Request) -> list[dict[str, Any]]:
+    """Research artefacts (exit-policy / bandit experiments) under data/rl, newest first."""
+    out = []
+    for path in sorted(_rl_dir(request).glob("*.json"), reverse=True):
+        try:
+            d = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        out.append(
+            {
+                "name": path.stem,
+                "kind": d.get("kind"),
+                "created_ts": d.get("created_ts"),
+                "summary": d.get("summary"),
+                "config": {
+                    k: v
+                    for k, v in (d.get("config") or {}).items()
+                    if k not in ("arms", "obs_columns", "actions")
+                },
+            }
+        )
+    return out
+
+
+@router.get("/rl/runs/{name}")
+async def rl_run(request: Request, name: str) -> dict[str, Any]:
+    if "/" in name or ".." in name:
+        raise HTTPException(400, "bad name")
+    path = _rl_dir(request) / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(404, "unknown run")
+    d = json.loads(path.read_text())
+    d.pop("policy", None)  # weights are large and not useful in the UI
+    return d
 
 
 class ModeBody(BaseModel):

@@ -5,6 +5,7 @@ import { Backtest } from './pages/Backtest'
 import { Chart } from './pages/Chart'
 import { Committee } from './pages/Committee'
 import { Market } from './pages/Market'
+import { RL } from './pages/RL'
 import { Micro } from './pages/Micro'
 import { Options } from './pages/Options'
 import { Overview } from './pages/Overview'
@@ -24,6 +25,7 @@ const PAGES = [
   ['/micro', 'Microstructure'],
   ['/options', 'Options'],
   ['/market', 'Market'],
+  ['/rl', 'RL'],
   ['/committee', 'Committee'],
   ['/system', 'System'],
 ] as const
@@ -59,6 +61,7 @@ export default function App() {
             <Route path="/micro" element={<Micro />} />
             <Route path="/options" element={<Options />} />
             <Route path="/market" element={<Market />} />
+            <Route path="/rl" element={<RL />} />
             <Route path="/committee" element={<Committee />} />
             <Route path="/system" element={<System />} />
           </Routes>

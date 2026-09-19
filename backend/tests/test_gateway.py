@@ -67,9 +67,9 @@ def test_halt_blocks_entries_but_not_exits() -> None:
     )
 
 
-def test_stale_book_is_refused_and_live_is_refused_until_step_8() -> None:
+def test_stale_book_is_refused_and_live_needs_submit_live() -> None:
     gw = _gw(Mode.PAPER)
     r = gw.submit(_intent(), contract_value=0.001, now_us=1_000_000_000 + 10_000_000)
     assert r.decision is Decision.REJECTED_VENUE and "ms old" in r.order.note
     live = _gw(Mode.LIVE).submit(_intent(), contract_value=0.001)
-    assert live.decision is Decision.REJECTED_VENUE and "step 8" in live.order.note
+    assert live.decision is Decision.REJECTED_VENUE and "submit_live" in live.order.note

@@ -275,6 +275,7 @@ async def committee_labels(
 
 class ModeBody(BaseModel):
     mode: str
+    arm_hours: float | None = None  # required for LIVE_CAPPED / LIVE (0.5–24)
 
 
 class HaltBody(BaseModel):
@@ -284,13 +285,14 @@ class HaltBody(BaseModel):
 
 @router.get("/control")
 async def control_(request: Request) -> dict[str, Any]:
-    return _engine(request).control
+    eng = _engine(request)
+    return {**eng.control, "armed": eng.live_armed(), "live_available": eng.live is not None}
 
 
 @router.post("/control/mode")
 async def set_mode(request: Request, body: ModeBody) -> dict[str, Any]:
     try:
-        return await _engine(request).set_mode(body.mode.upper())
+        return await _engine(request).set_mode(body.mode.upper(), arm_hours=body.arm_hours)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -298,3 +300,32 @@ async def set_mode(request: Request, body: ModeBody) -> dict[str, Any]:
 @router.post("/control/halt")
 async def set_halt(request: Request, body: HaltBody) -> dict[str, Any]:
     return await _engine(request).set_halt(body.halted, body.reason)
+
+
+@router.post("/control/kill")
+async def kill(request: Request) -> dict[str, Any]:
+    """Halt entries, cancel every venue order and close every venue position at market."""
+    return await _engine(request).kill("manual kill (API)")
+
+
+@router.get("/control/live")
+async def live_status(request: Request) -> dict[str, Any]:
+    eng = _engine(request)
+    return {
+        "mode": eng.control.get("mode"),
+        "armed": eng.live_armed(),
+        "armed_until": eng.control.get("armed_until"),
+        "live": eng.live.status() if eng.live else None,
+        "private_ws": eng.live_ws.stats() if eng.live_ws else None,
+        "reconcile": eng.reconciler.status(),
+        "caps": eng.gateway.stats().get("caps"),
+        "venue_positions": eng.venue_positions,
+    }
+
+
+@router.post("/control/reconcile")
+async def reconcile_now(request: Request) -> dict[str, Any]:
+    eng = _engine(request)
+    if eng.live is None:
+        raise HTTPException(409, "no API keys configured")
+    return (await eng.reconciler.reconcile_once()).to_json()

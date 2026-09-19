@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -30,7 +31,11 @@ class CommitteeService:
     def __init__(self, engine: Engine, settings: Settings, llm: LLM | None = None) -> None:
         self.engine = engine
         self.settings = settings
-        key = settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+        key = (
+            settings.anthropic_api_key.get_secret_value()
+            if settings.anthropic_api_key
+            else os.environ.get("ANTHROPIC_API_KEY") or None
+        )
         self.llm: LLM | None = llm or (AnthropicLLM(key, settings.committee_model) if key else None)
         self.available = self.llm is not None
         self.scheduled = self.available and settings.committee_enabled

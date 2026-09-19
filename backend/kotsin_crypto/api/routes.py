@@ -283,7 +283,7 @@ def _rl_dir(request: Request) -> Path:
 async def rl_runs(request: Request) -> list[dict[str, Any]]:
     """Research artefacts (exit-policy / bandit experiments) under data/rl, newest first."""
     out = []
-    for path in sorted(_rl_dir(request).glob("*.json"), reverse=True):
+    for path in sorted(_rl_dir(request).glob("*.json")):
         try:
             d = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -301,6 +301,7 @@ async def rl_runs(request: Request) -> list[dict[str, Any]]:
                 },
             }
         )
+    out.sort(key=lambda r: float(r["created_ts"] or 0), reverse=True)
     return out
 
 

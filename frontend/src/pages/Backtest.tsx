@@ -35,6 +35,16 @@ export function Backtest() {
     if (!symbols.length && all.length) setSymbols([all[0]])
   }, [all, symbols.length])
 
+  // open the most recent finished run on first visit
+  useEffect(() => {
+    if (jobId || !runs.data?.length) return
+    const latest = runs.data.find((r) => r.status === 'done')
+    if (latest) {
+      setJobId(latest.id)
+      setChartSym((latest.cfg.symbols as string[])[0])
+    }
+  }, [runs.data, jobId])
+
   useEffect(() => {
     if (!jobId) return
     let alive = true

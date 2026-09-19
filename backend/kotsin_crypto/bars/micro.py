@@ -23,7 +23,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from statistics import median
 
-from ..feed.book import Level
+from ..domain import Level
 
 MINUTE_US = 60_000_000
 

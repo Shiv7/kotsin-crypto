@@ -34,6 +34,14 @@ class ExitReason(StrEnum):
     END = "END"  # backtest range ended with the position open
 
 
+@dataclass(slots=True)
+class Level:
+    """One price level of an order book (also used by the tape-side microstructure builder)."""
+
+    price: float
+    size: int
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 

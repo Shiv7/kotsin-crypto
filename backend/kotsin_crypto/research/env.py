@@ -18,7 +18,24 @@ import numpy as np
 
 from ..bars.unified import UnifiedBar
 
-OBS_COLUMNS = ["r_now", "peak_r", "drawdown_from_peak_r", "bars_held", "hours_to_funding", "ret_3", "ret_12", "rv_12", "surge_20", "vwap_dist_12", "pos_in_range_48", "buy_ratio", "vpin_fast", "kyle_bps", "hour_sin", "hour_cos"]
+OBS_COLUMNS = [
+    "r_now",
+    "peak_r",
+    "drawdown_from_peak_r",
+    "bars_held",
+    "hours_to_funding",
+    "ret_3",
+    "ret_12",
+    "rv_12",
+    "surge_20",
+    "vwap_dist_12",
+    "pos_in_range_48",
+    "buy_ratio",
+    "vpin_fast",
+    "kyle_bps",
+    "hour_sin",
+    "hour_cos",
+]
 ACTIONS = ("hold", "stop_to_breakeven", "trail_1r", "trail_0_5r", "exit_now")
 
 
@@ -46,7 +63,13 @@ class ExitEnv:
     """Deterministic given (bars, features, episode, actions). ``reset`` returns the first observation
     at the fill bar's close; each ``step`` advances one bar."""
 
-    def __init__(self, bars: Sequence[UnifiedBar], features: dict[str, np.ndarray], episode: ExitEpisode, max_bars: int = 48) -> None:
+    def __init__(
+        self,
+        bars: Sequence[UnifiedBar],
+        features: dict[str, np.ndarray],
+        episode: ExitEpisode,
+        max_bars: int = 48,
+    ) -> None:
         self.bars = bars
         self.f = features
         self.ep = episode
@@ -79,7 +102,17 @@ class ExitEnv:
             "hour_sin": self.f["hour_sin"][self.i],
             "hour_cos": self.f["hour_cos"][self.i],
         }
-        for c in ("ret_3", "ret_12", "rv_12", "surge_20", "vwap_dist_12", "pos_in_range_48", "buy_ratio", "vpin_fast", "kyle_bps"):
+        for c in (
+            "ret_3",
+            "ret_12",
+            "rv_12",
+            "surge_20",
+            "vwap_dist_12",
+            "pos_in_range_48",
+            "buy_ratio",
+            "vpin_fast",
+            "kyle_bps",
+        ):
             v = self.f[c][self.i]
             row[c] = 0.0 if np.isnan(v) else float(v)
         return np.array([row[c] for c in OBS_COLUMNS], dtype=float)
@@ -122,7 +155,9 @@ class ExitEnv:
         return StepResult(self.obs(), reward, False, {"r_now": self._r(nb.close)})
 
     def _tighten(self, new_stop: float) -> None:
-        if (self.ep.side > 0 and new_stop > self.stop) or (self.ep.side < 0 and new_stop < self.stop):
+        if (self.ep.side > 0 and new_stop > self.stop) or (
+            self.ep.side < 0 and new_stop < self.stop
+        ):
             self.stop = new_stop
 
     def _finish(self, px: float, reason: str) -> StepResult:
@@ -134,7 +169,12 @@ class ExitEnv:
         net = self._net_r(fill)
         reward = net - self._last_net_r
         self._last_net_r = net
-        return StepResult(self.obs() if self.i < len(self.bars) else np.zeros(len(OBS_COLUMNS)), reward, True, {"exit": fill, "reason": reason, "net_r": net})
+        return StepResult(
+            self.obs() if self.i < len(self.bars) else np.zeros(len(OBS_COLUMNS)),
+            reward,
+            True,
+            {"exit": fill, "reason": reason, "net_r": net},
+        )
 
     @property
     def net_r(self) -> float:

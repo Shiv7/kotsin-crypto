@@ -6,11 +6,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..domain import Level
 
-@dataclass(slots=True)
-class Level:
-    price: float
-    size: int
+__all__ = ["Book", "Level", "WalkResult"]
 
 
 @dataclass(slots=True)

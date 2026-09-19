@@ -1,7 +1,11 @@
 import { useEffect } from 'react'
 import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { ModeBanner } from './components/ModeBanner'
+import { Backtest } from './pages/Backtest'
 import { Chart } from './pages/Chart'
+import { Market } from './pages/Market'
+import { Micro } from './pages/Micro'
+import { Options } from './pages/Options'
 import { Overview } from './pages/Overview'
 import { Risk } from './pages/Risk'
 import { Signals } from './pages/Signals'
@@ -15,6 +19,10 @@ const PAGES = [
   ['/signals', 'Signals'],
   ['/trades', 'Trades'],
   ['/risk', 'Risk'],
+  ['/backtest', 'Backtest'],
+  ['/micro', 'Microstructure'],
+  ['/options', 'Options'],
+  ['/market', 'Market'],
   ['/system', 'System'],
 ] as const
 
@@ -45,6 +53,10 @@ export default function App() {
             <Route path="/signals" element={<Signals />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/risk" element={<Risk />} />
+            <Route path="/backtest" element={<Backtest />} />
+            <Route path="/micro" element={<Micro />} />
+            <Route path="/options" element={<Options />} />
+            <Route path="/market" element={<Market />} />
             <Route path="/system" element={<System />} />
           </Routes>
         </main>

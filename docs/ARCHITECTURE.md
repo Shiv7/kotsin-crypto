@@ -77,6 +77,15 @@ Boundaries enforced by `import-linter` (`backend/pyproject.toml`): `strategy` ma
   are always allowed through the gateway even while halted.
 - Funding is accrued on the 1 s clock when `now ≥ nfr` for an open position, once per realization.
 
+## Bar verification (finding from the first soak, 2026-09-20)
+
+Our 1m bars are built from the `trades` channel bucketed by **trade time** (`t`). Delta's WebSocket
+`candlestick_1m` buckets by **publish time** (`ts`, 0.1–0.6 s later), so a trade near a minute boundary
+lands in the adjacent candle: volumes differ in cancelling pairs and opens/closes differ by one trade.
+Delta's **REST** candles bucket by trade time and match our bars exactly (602 = 602 …), and the trade
+stream is complete (every REST trade is on our tape). Therefore `rest_check` (every 5 min, weight 3) is
+the authoritative determinism metric; `candle_check` (vs the WS candle) is kept as a boundary-shift counter.
+
 ## Mode and arming
 
 `Mode ∈ {SHADOW, PAPER, LIVE_CAPPED, LIVE}` is a row in the `control` table. `LIVE*` requires an explicit

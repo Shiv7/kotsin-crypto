@@ -101,6 +101,104 @@ async def bars_(
     return [asdict(b) for b in bars]
 
 
+@router.get("/forming")
+async def forming_(request: Request, symbol: str, tf: str = "5m") -> dict[str, Any] | None:
+    eng = _engine(request)
+    if symbol not in eng.symbols:
+        raise HTTPException(404, f"unknown symbol {symbol}")
+    try:
+        bar = eng.forming_bar(symbol, tf)
+    except KeyError as exc:
+        raise HTTPException(404, f"unknown timeframe {tf}") from exc
+    return asdict(bar) if bar else None
+
+
+@router.get("/micro")
+async def micro_(request: Request, symbol: str, levels: int = Query(10, le=15)) -> dict[str, Any]:
+    eng = _engine(request)
+    if symbol not in eng.symbols:
+        raise HTTPException(404, f"unknown symbol {symbol}")
+    return eng.micro_view(symbol, levels)
+
+
+@router.get("/market/perps")
+async def market_perps(request: Request, limit: int = Query(80, le=300)) -> dict[str, Any]:
+    eng = _engine(request)
+    rows = await eng.market.perps()
+    return {
+        "fetched_ts": eng.market._cache["perps"][0],
+        "watched": eng.symbols,
+        "rows": rows[:limit],
+        "total": len(rows),
+    }
+
+
+@router.get("/options/expiries")
+async def options_expiries(request: Request, underlying: str = "BTC") -> list[dict[str, Any]]:
+    return await _engine(request).market.option_expiries(underlying.upper())
+
+
+@router.get("/options/chain")
+async def options_chain(request: Request, underlying: str, expiry: str) -> dict[str, Any]:
+    try:
+        return await _engine(request).market.option_chain(underlying.upper(), expiry)
+    except ValueError as exc:
+        raise HTTPException(400, f"bad expiry {expiry!r}: {exc}") from exc
+
+
+class BacktestBody(BaseModel):
+    symbols: list[str]
+    start: int
+    end: int
+    tf: str = "5m"
+    strategy: str = "CAN2"
+    params: dict[str, Any] = {}
+    initial_usd: float = 10_000.0
+    taker_fee_rate: float = 0.0005
+    slippage_bps: dict[str, float] | None = None
+    default_slippage_bps: float = 2.0
+    apply_funding: bool = True
+    limits: dict[str, Any] = {}
+
+
+def _jobs(request: Request):
+    eng = _engine(request)
+    if eng.backtests is None:
+        raise HTTPException(503, "backtests not ready")
+    return eng.backtests
+
+
+@router.post("/backtest")
+async def backtest_submit(request: Request, body: BacktestBody) -> dict[str, Any]:
+    try:
+        return _jobs(request).submit(body.model_dump())
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/backtest")
+async def backtest_list(request: Request) -> list[dict[str, Any]]:
+    return _jobs(request).list()
+
+
+@router.get("/backtest/{job_id}")
+async def backtest_get(request: Request, job_id: str) -> dict[str, Any]:
+    try:
+        return _jobs(request).status(job_id)
+    except KeyError as exc:
+        raise HTTPException(404, "unknown backtest") from exc
+
+
+@router.get("/backtest/{job_id}/bars")
+async def backtest_bars(
+    request: Request, job_id: str, symbol: str, tf: str = "5m", n: int = Query(5000, le=20000)
+) -> list[dict[str, Any]]:
+    try:
+        return await _jobs(request).bars(job_id, symbol, tf, n)
+    except KeyError as exc:
+        raise HTTPException(404, f"unknown {exc}") from exc
+
+
 class ModeBody(BaseModel):
     mode: str
 

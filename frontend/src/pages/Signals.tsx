@@ -1,4 +1,5 @@
 import { usePoll } from '../hooks/usePoll'
+import { useTz } from '../store/tz'
 import { fmt, getJson } from '../lib/api'
 import type { Signal } from '../types'
 import { Table } from '../components/Table'
@@ -6,6 +7,7 @@ import { Table } from '../components/Table'
 const COLOR: Record<string, string> = { PAPER_FILLED: 'text-emerald-400', SHADOW_OK: 'text-sky-400', SUBMITTED: 'text-emerald-400' }
 
 export function Signals() {
+  useTz((s) => s.tz)
   const { data, error } = usePoll(() => getJson<Signal[]>('/api/signals?limit=300'), 5000)
   return (
     <section className="p-6 space-y-3">

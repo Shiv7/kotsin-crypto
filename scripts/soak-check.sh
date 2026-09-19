@@ -14,7 +14,8 @@ chans = ", ".join("%s:%d" % (k, v["count"]) for k, v in f["channels"].items())
 print("channels: {" + chans + "}" + ("  STALE: %s" % stale if stale else ""))
 print("books: " + ", ".join(f"{k} {v['age_ms']}ms {v['spread_bps']}bps" for k, v in s['books'].items()))
 print("bars:  " + ", ".join(f"{k} 1m={v['counts']['1m']} 5m={v['counts']['5m']} last_age={v['last_1m_age_s']}s" for k, v in s['bars'].items()))
-print(f"candle check: ohlc {cc['ohlc_match']}/{cc['compared']} · volume {cc['volume_match']}/{cc['compared']} · partial bars {c.get('bars_partial', 0)} · late trades {sum(s['late_trades'].values())}")
+rc = s.get("rest_check", {})
+print(f"bars vs REST candles (authoritative): ohlc {rc.get('ohlc_match')}/{rc.get('compared')} · volume {rc.get('volume_match')}/{rc.get('compared')} · vs WS candle (boundary-shift counter): ohlc {cc['ohlc_match']}/{cc['compared']} vol {cc['volume_match']}/{cc['compared']} · partial bars {c.get('bars_partial', 0)} · late trades {sum(s['late_trades'].values())}")
 mb = sum(a['bytes'].values()) / 1e6
 print(f"archive: {mb:.0f} MB, {sum(a['rows'].values())} rows, {a['errors']} errors, buffered {a['buffered']}, last flush {a['last_flush_age_s']}s")
 g = s["gateway"]

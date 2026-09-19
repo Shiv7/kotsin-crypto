@@ -1,9 +1,11 @@
 import { usePoll } from '../hooks/usePoll'
+import { useTz } from '../store/tz'
 import { fmt, getJson } from '../lib/api'
 import type { Trade } from '../types'
 import { Pnl, Stat, Table } from '../components/Table'
 
 export function Trades() {
+  useTz((s) => s.tz)
   const { data, error } = usePoll(() => getJson<Trade[]>('/api/trades?limit=500'), 5000)
   const t = data ?? []
   const net = t.reduce((a, x) => a + x.net, 0)

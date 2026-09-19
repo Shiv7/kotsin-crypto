@@ -208,6 +208,25 @@ class BarStore:
         self._partial[closed.symbol][closed.tf] = None
         return closed
 
+    def forming(self, symbol: str, tf: str, forming_1m: UnifiedBar | None) -> UnifiedBar | None:
+        """The still-open bar for ``tf``: the closed 1m bars of the current bucket plus the forming minute."""
+        if tf == "1m":
+            return forming_1m
+        s = TF_SECONDS[tf]
+        partial = self._partial[symbol][tf]
+        bars: list[UnifiedBar] = list(partial.bars) if partial else []
+        bucket = partial.bucket if partial else None
+        if forming_1m is not None:
+            b1 = forming_1m.ts - forming_1m.ts % s
+            if bucket is None or b1 == bucket:
+                bars.append(forming_1m)
+                bucket = b1
+            elif b1 > bucket:
+                bars, bucket = [forming_1m], b1
+        if not bars or bucket is None:
+            return None
+        return replace(aggregate(bars, tf, bucket), source="forming")
+
     def bars(self, symbol: str, tf: str, n: int) -> list[UnifiedBar]:
         d = self._bars[symbol][tf]
         return list(d)[-n:] if n < len(d) else list(d)

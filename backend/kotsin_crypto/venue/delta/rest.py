@@ -153,6 +153,7 @@ class DeltaRest:
         states: str | None = "live",
         page_size: int = 500,
         after: str | None = None,
+        **extra: Any,
     ) -> dict[str, Any]:
         return await self._request(
             "GET",
@@ -162,6 +163,7 @@ class DeltaRest:
                 "states": states,
                 "page_size": page_size,
                 "after": after,
+                **extra,
             },
         )
 
@@ -178,9 +180,13 @@ class DeltaRest:
     async def ticker(self, symbol: str) -> dict[str, Any]:
         return (await self._request("GET", f"/v2/tickers/{symbol}"))["result"]
 
-    async def tickers(self, contract_types: str | None = None) -> list[dict[str, Any]]:
+    async def tickers(
+        self, contract_types: str | None = None, **params: Any
+    ) -> list[dict[str, Any]]:
         return (
-            await self._request("GET", "/v2/tickers", params={"contract_types": contract_types})
+            await self._request(
+                "GET", "/v2/tickers", params={"contract_types": contract_types, **params}
+            )
         )["result"]
 
     async def candles(

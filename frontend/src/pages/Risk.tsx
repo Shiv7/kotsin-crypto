@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { usePoll } from '../hooks/usePoll'
+import { useTz } from '../store/tz'
 import { fmt, getJson, postJson } from '../lib/api'
 import type { Control, Position, Snapshot, Wallet } from '../types'
 import { Stat, Table } from '../components/Table'
 
 export function Risk() {
+  useTz((s) => s.tz)
   const sys = usePoll(() => getJson<Snapshot>('/api/system'), 3000)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')

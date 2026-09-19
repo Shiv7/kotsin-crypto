@@ -7,7 +7,7 @@ clock keeps moving in quiet periods; the unified bar marks them ``has_trades=Fal
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 MINUTE_US = 60_000_000
 
@@ -47,6 +47,10 @@ class TradeBarBuilder:
     @property
     def last_close(self) -> float | None:
         return self._last_close
+
+    def current(self) -> TradeBar | None:
+        """A copy of the still-forming minute, or None if no trade has arrived in it yet."""
+        return replace(self._cur) if self._cur is not None else None
 
     def on_trade(self, ts_us: int, price: float, size: float, taker_buy: bool) -> list[TradeBar]:
         minute = ts_us // MINUTE_US

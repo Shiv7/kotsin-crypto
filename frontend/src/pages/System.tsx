@@ -1,9 +1,11 @@
 import { usePoll } from '../hooks/usePoll'
+import { useTz } from '../store/tz'
 import { fmt, getJson } from '../lib/api'
 import type { Snapshot } from '../types'
 import { Stat, Table } from '../components/Table'
 
 export function System() {
+  useTz((s) => s.tz)
   const { data: s, error } = usePoll(() => getJson<Snapshot>('/api/system'), 3000)
   const feed = s?.feed
   const chans = Object.entries(feed?.channels ?? {}) as [string, { count: number; age_s: number }][]

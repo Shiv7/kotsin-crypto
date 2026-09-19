@@ -50,6 +50,7 @@ from .feed.parse import (
 )
 from .ledger.db import Ledger
 from .ops.telegram import Telegram
+from .research.jobs import BacktestJobs
 from .risk.exits import ExitEngine
 from .risk.limits import RiskLimits
 from .risk.sizing import size_position
@@ -57,6 +58,7 @@ from .risk.wallet import Wallet
 from .strategy.base import Side, Signal, Strategy
 from .strategy.can2 import Can2
 from .venue.delta.catalogue import Catalogue
+from .venue.delta.market import MarketData
 from .venue.delta.rest import DeltaRest
 from .venue.delta.ws_public import DeltaPublicWS, channels_for
 
@@ -84,6 +86,8 @@ class Engine:
 
         self.rest = DeltaRest(settings)
         self.catalogue: Catalogue | None = None
+        self.market = MarketData(self.rest)
+        self.backtests: BacktestJobs | None = None
         self.ledger = Ledger(settings.db_url)
         self.control: dict[str, Any] = {"mode": "SHADOW", "halted": False, "halt_reason": ""}
 
@@ -109,6 +113,17 @@ class Engine:
             "volume_match": 0,
             "examples": deque(maxlen=12),
         }
+        # WS candlestick_1m buckets trades by publish time, so boundary trades shift a minute: that
+        # comparison is a "boundary shift" counter. The authoritative check is against REST candles.
+        self.rest_check: dict[str, Any] = {
+            "compared": 0,
+            "ohlc_match": 0,
+            "volume_match": 0,
+            "last_run_ts": None,
+            "examples": deque(maxlen=12),
+        }
+        self._rest_checked: set[tuple[str, int]] = set()
+        self._last_rest_check = 0.0
 
         self.limits = RiskLimits()
         self.exits = ExitEngine(self.limits)
@@ -142,6 +157,9 @@ class Engine:
         missing = [x for x in self.symbols if x not in self.catalogue]
         if missing:
             raise RuntimeError(f"symbols not in the live catalogue: {missing}")
+        self.backtests = BacktestJobs(
+            self.rest, s.data_dir / "history", s.data_dir / "backtests", self.catalogue
+        )
         btc = self.catalogue.by_symbol(self.symbols[0])
         self.matcher = PaperMatcher(taker_fee_rate=float(btc.taker_fee or 0.0005))
         self.gateway = Gateway(
@@ -375,6 +393,61 @@ class Engine:
                     "delta": [theirs.open, theirs.high, theirs.low, theirs.close, theirs.volume],
                 }
             )
+
+    async def verify_against_rest(self) -> None:
+        """Compare our closed live 1m bars with Delta's REST candles (trade-time bucketed, like ours)."""
+        assert self.catalogue is not None
+        now = int(time.time())
+        for sym in self.symbols:
+            ours = [
+                b
+                for b in self.store.bars(sym, "1m", 30)
+                if b.source == "live" and (sym, b.ts) not in self._rest_checked and b.ts + 120 < now
+            ]
+            if not ours:
+                continue
+            try:
+                rows = {
+                    int(c["time"]): c
+                    for c in await self.rest.candles(sym, "1m", ours[0].ts, ours[-1].ts + 60)
+                }
+            except Exception as exc:
+                log.warning("rest_check_failed", symbol=sym, error=str(exc))
+                continue
+            tick = float(self.catalogue.by_symbol(sym).tick_size)
+            for b in ours:
+                c = rows.get(b.ts)
+                if c is None:
+                    continue
+                self._rest_checked.add((sym, b.ts))
+                rc = self.rest_check
+                rc["compared"] += 1
+                theirs = [
+                    float(c["open"]),
+                    float(c["high"]),
+                    float(c["low"]),
+                    float(c["close"]),
+                    float(c.get("volume") or 0.0),
+                ]
+                ohlc_ok = all(
+                    abs(a - t) <= tick + 1e-9
+                    for a, t in zip((b.open, b.high, b.low, b.close), theirs[:4], strict=True)
+                )
+                vol_ok = abs(b.volume - theirs[4]) <= max(1.0, 0.001 * theirs[4])
+                rc["ohlc_match"] += ohlc_ok
+                rc["volume_match"] += vol_ok
+                if not (ohlc_ok and vol_ok):
+                    rc["examples"].append(
+                        {
+                            "symbol": sym,
+                            "ts": b.ts,
+                            "ours": [b.open, b.high, b.low, b.close, b.volume],
+                            "rest": theirs,
+                        }
+                    )
+            self.rest_check["last_run_ts"] = time.time()
+        if len(self._rest_checked) > 5000:
+            self._rest_checked = set(sorted(self._rest_checked, key=lambda x: x[1])[-2000:])
 
     # ---- signals → risk → gateway ----------------------------------------------------------------
     def _on_signal(self, sig: Signal, bar: UnifiedBar, now: float) -> None:
@@ -682,6 +755,9 @@ class Engine:
             if w.rollover(now):
                 self._persist(self.ledger.upsert_wallet(key, w.to_json()))
                 self._persist(self.ledger.event("rollover", {"strategy": key, "day": w.day}))
+        if now - self._last_rest_check >= 300 and self.ws.connected:
+            self._last_rest_check = now
+            self._persist(self.verify_against_rest())
         hour_key = time.strftime("%Y-%m-%dT%H", time.gmtime(now))
         if hour_key != self._last_hour_key:
             self._last_hour_key = hour_key
@@ -740,6 +816,119 @@ class Engine:
                 log.exception("db_write_failed")
 
     # ---- views -------------------------------------------------------------------------------------
+    def forming_bar(self, symbol: str, tf: str) -> UnifiedBar | None:
+        tb = self.trade_builders[symbol].current()
+        f1 = (
+            merge_1m(
+                tb,
+                None,
+                oi=self.oi.get(symbol),
+                mark_close=self.marks.get(symbol),
+                source="forming",
+            )
+            if tb
+            else None
+        )
+        return self.store.forming(symbol, tf, f1)
+
+    def micro_view(self, symbol: str, levels: int = 10) -> dict[str, Any]:
+        book = self.books[symbol]
+        now_us = int(time.time() * 1e6)
+
+        def ladder(side: list[Any]) -> list[dict[str, float]]:
+            out, cum = [], 0
+            for lv in side[:levels]:
+                cum += lv.size
+                out.append({"price": lv.price, "size": lv.size, "cum": cum})
+            return out
+
+        bars = self.store.bars(symbol, "1m", 15)
+
+        def roll(n: int) -> dict[str, float | None]:
+            xs = bars[-n:]
+            vol = sum(b.volume for b in xs)
+            buy = sum(b.buy_volume for b in xs)
+            return {
+                "ofi": sum(b.ofi or 0.0 for b in xs if b.has_book),
+                "buy_volume": buy,
+                "sell_volume": sum(b.sell_volume for b in xs),
+                "buy_ratio": buy / vol if vol else None,
+                "volume": vol,
+                "trades": sum(b.trade_count for b in xs),
+                "imbalance": (
+                    sum(b.depth_imbalance or 0.0 for b in xs if b.depth_imbalance is not None)
+                    / max(1, sum(1 for b in xs if b.depth_imbalance is not None))
+                )
+                if any(b.depth_imbalance is not None for b in xs)
+                else None,
+            }
+
+        forming = self.trade_builders[symbol].current()
+        return {
+            "symbol": symbol,
+            "ts": now_us / 1e6,
+            "book": {
+                "bids": ladder(book.bids),
+                "asks": ladder(book.asks),
+                "age_ms": book.age_ms(now_us),
+                "updates": book.updates,
+            },
+            "quotes": {
+                "bid": book.best_bid.price if book.best_bid else None,
+                "bid_size": book.best_bid.size if book.best_bid else None,
+                "ask": book.best_ask.price if book.best_ask else None,
+                "ask_size": book.best_ask.size if book.best_ask else None,
+                "mid": book.mid,
+                "microprice": book.microprice,
+                "spread_bps": book.spread_bps,
+                "imbalance5": book.imbalance(5),
+                "imbalance10": book.imbalance(10),
+                "depth_bid10": book.depth("bid", 10),
+                "depth_ask10": book.depth("ask", 10),
+            },
+            "mark": self.marks.get(symbol),
+            "spot": self.spot.get(symbol),
+            "last": self.last_price.get(symbol),
+            "oi": self.oi.get(symbol),
+            "funding": {
+                "rate_pct": self.funding[symbol].rate_pct,
+                "next_ts": self.funding[symbol].next_ts_us / 1e6,
+            }
+            if symbol in self.funding
+            else None,
+            "rolling": {"1m": roll(1), "5m": roll(5), "15m": roll(15)},
+            "forming_1m": {
+                "ts": forming.ts,
+                "open": forming.open,
+                "high": forming.high,
+                "low": forming.low,
+                "close": forming.close,
+                "volume": forming.volume,
+                "buy_volume": forming.buy_volume,
+                "sell_volume": forming.sell_volume,
+                "trade_count": forming.trade_count,
+            }
+            if forming
+            else None,
+            "recent_1m": [
+                {
+                    "ts": b.ts,
+                    "close": b.close,
+                    "volume": b.volume,
+                    "buy_volume": b.buy_volume,
+                    "sell_volume": b.sell_volume,
+                    "trade_count": b.trade_count,
+                    "ofi": b.ofi,
+                    "microprice": b.microprice,
+                    "spread_bps": b.spread_bps,
+                    "imbalance": b.depth_imbalance,
+                    "vwap": b.vwap,
+                    "source": b.source,
+                }
+                for b in bars
+            ],
+        }
+
     def position_view(self, pos: Position) -> dict[str, Any]:
         mark = self.marks.get(pos.symbol) or self.last_price.get(pos.symbol)
         d = to_json(pos)
@@ -791,6 +980,9 @@ class Engine:
             "candle_check": {
                 k: (list(v) if isinstance(v, deque) else v) for k, v in self.candle_check.items()
             },
+            "rest_check": {
+                k: (list(v) if isinstance(v, deque) else v) for k, v in self.rest_check.items()
+            },
             "archive": self.archive.stats(),
             "gateway": self.gateway.stats(),
             "rate_budget": {"used": self.rest.budget.used(), "quota": self.rest.budget.quota},
@@ -805,6 +997,6 @@ class Engine:
             "db_queue": self._db_queue.qsize(),
         }
         if brief:
-            snap.pop("candle_check")
             snap["candle_check"] = {k: v for k, v in self.candle_check.items() if k != "examples"}
+            snap["rest_check"] = {k: v for k, v in self.rest_check.items() if k != "examples"}
         return snap

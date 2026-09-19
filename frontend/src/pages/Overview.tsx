@@ -1,9 +1,11 @@
 import { usePoll } from '../hooks/usePoll'
+import { useTz } from '../store/tz'
 import { fmt, getJson } from '../lib/api'
 import type { Position, Wallet } from '../types'
 import { Pnl, Table } from '../components/Table'
 
 export function Overview() {
+  useTz((s) => s.tz)
   const wallets = usePoll(() => getJson<Record<string, Wallet>>('/api/wallets'), 3000)
   const positions = usePoll(() => getJson<Position[]>('/api/positions'), 2000)
   const ws = Object.values(wallets.data ?? {})
@@ -39,7 +41,7 @@ export function Overview() {
                   </span>
                   <span>drawdown</span>
                   <span>{fmt.num(w.drawdown_pct)}%</span>
-                  <span>day</span>
+                  <span>day (UTC)</span>
                   <span>{w.day}</span>
                 </div>
               </div>

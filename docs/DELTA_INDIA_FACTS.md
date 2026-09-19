@@ -50,6 +50,9 @@ The public socket accepts only the **short** channel names; the long names in ol
 | `spot_price` | `.DEXBTUSD` | `{"p","sy","ts"}` | 2/s |
 | `system_status` | none | `{"event","status","maintenance_*","timestamp"}` | on change |
 
+`candlestick_1m` on the WS buckets trades by publish time; REST `/v2/history/candles` buckets by trade
+time (verified: our trade-time bars equal REST candles exactly). Option chain: `GET /v2/tickers?contract_types=call_options,put_options&underlying_asset_symbols=BTC&expiry_date=DD-MM-YYYY`.
+
 Heartbeats arrive every ~5 s after `{"type":"enable_heartbeat"}`. A subscribe with any malformed entry
 fails as a whole ("Invalid channel array").
 

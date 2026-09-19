@@ -58,10 +58,10 @@ docker compose -f deploy/docker-compose.yml up --build
 | 1 | Skeleton, closed config, bus, Delta REST client + product catalogue, Telegram, CI | boot fails on a misspelled key; CI green; `pytest -m live` sees BTCUSD | ✅ |
 | 2 | Public WS feed + JSONL archive + L2 book | 24h unattended, zero unrecovered gaps | 🟡 built — 24h soak running |
 | 3 | 1m trade/book/OI bars, UnifiedBar, REST backfill | live 1m bars match Delta's `candlestick_1m`; archive replay byte-identical | 🟡 built — live check vs Delta candles running |
-| 4 | Backtester + cost model | a null strategy backtests to exactly −fees −funding | ⬜ |
+| 4 | Backtester + cost model (next-open fills, intrabar stops, fees, funding, slippage; Parquet-cached history) | null strategy → 0 trades, 0 costs (tested); replays the live strategy/risk code | 🟡 built — UI page with trades on price |
 | 5 | Strategies CAN2 → FUDKII → BB-squeeze | artefact per strategy, ≥300 OOS trades, net edge > 0.15%/trade | 🟡 CAN2-crypto built (pipeline-test parameters, no edge claim) |
 | 6 | Risk + gateway (PAPER) + ledger | ≥2 weeks / ≥100 paper trades | 🟡 built — first 24h paper soak running |
-| 7 | API/WS + frontend pages | all six pages live off the paper run | 🟡 built |
+| 7 | API/WS + frontend: Overview, Chart (live forming candle), Signals, Trades, Risk, Backtest, Microstructure, Options, Market, System — IST/UTC toggle | all pages live off the paper run | 🟡 built |
 | 8 | Private WS, live orders, reconciliation → testnet LIVE → mainnet LIVE_CAPPED | 5 kill -9 restarts with open positions, zero unreconciled | ⬜ |
 
 Full table with rationale: `docs/ARCHITECTURE.md`.

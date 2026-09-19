@@ -31,6 +31,7 @@ class ExitReason(StrEnum):
     HALT = "HALT"
     DAILY_LOSS = "DAILY_LOSS"
     MANUAL = "MANUAL"
+    END = "END"  # backtest range ended with the position open
 
 
 def new_id(prefix: str) -> str:

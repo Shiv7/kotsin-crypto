@@ -1,0 +1,15 @@
+services:
+  kotsin-crypto:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file: ../backend/.env
+    environment:
+      KC_API_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8400:8400"
+    volumes:
+      - ../data:/app/backend/data
+    restart: unless-stopped
+    mem_limit: 1g
+    stop_grace_period: 30s

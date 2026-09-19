@@ -1,0 +1,17 @@
+[Unit]
+Description=kotsin-crypto trading engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/kotsin-crypto/backend
+EnvironmentFile=/home/ubuntu/kotsin-crypto/backend/.env
+ExecStart=/home/ubuntu/.local/bin/uv run --no-dev kotsin-crypto
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

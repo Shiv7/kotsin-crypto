@@ -6,11 +6,13 @@ Merging is explicit: every optional input carries a ``has_*`` flag; nothing is s
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 
 from .book_bar import BookBar
+from .micro import MicroBar
 from .trade_bar import TradeBar
 
 TF_SECONDS: dict[str, int] = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400}
@@ -40,6 +42,19 @@ class UnifiedBar:
     depth_imbalance: float | None = None
     book_updates: int = 0
 
+    has_micro: bool = False
+    ofi_l5: float | None = None
+    ofi_l5_norm: float | None = None
+    kyle_lambda_bps_per_1k: float | None = None
+    kyle_r2: float | None = None
+    kyle_lambda_15m_bps_per_1k: float | None = None
+    vpin: float | None = None
+    vpin_fast: float | None = None
+    realized_vol_bps: float | None = None
+    trade_intensity: float | None = None
+    large_trade_share: float | None = None
+    max_run: int = 0
+
     has_oi: bool = False
     oi: float | None = None
 
@@ -62,7 +77,7 @@ class UnifiedBar:
 
 def merge_1m(
     trade: TradeBar,
-    book: BookBar | None,
+    book: BookBar | MicroBar | None,
     *,
     oi: float | None = None,
     funding_rate: float | None = None,
@@ -95,6 +110,18 @@ def merge_1m(
         funding_rate=funding_rate,
         has_mark=mark_close is not None,
         mark_close=mark_close,
+        has_micro=isinstance(book, MicroBar),
+        ofi_l5=getattr(book, "ofi_l5", None),
+        ofi_l5_norm=getattr(book, "ofi_l5_norm", None),
+        kyle_lambda_bps_per_1k=getattr(book, "kyle_lambda_bps_per_1k", None),
+        kyle_r2=getattr(book, "kyle_r2", None),
+        kyle_lambda_15m_bps_per_1k=getattr(book, "kyle_lambda_15m_bps_per_1k", None),
+        vpin=getattr(book, "vpin", None),
+        vpin_fast=getattr(book, "vpin_fast", None),
+        realized_vol_bps=getattr(book, "realized_vol_bps", None),
+        trade_intensity=getattr(book, "trade_intensity", None),
+        large_trade_share=getattr(book, "large_trade_share", None),
+        max_run=getattr(book, "max_run", 0) or 0,
         source=source,
     )
 
@@ -121,6 +148,14 @@ def aggregate(bars: Sequence[UnifiedBar], tf: str, ts: int) -> UnifiedBar:
     imb_bars = [b for b in book_bars if b.depth_imbalance is not None]
     imb = sum(b.depth_imbalance or 0.0 for b in imb_bars) / len(imb_bars) if imb_bars else None
     last_book = book_bars[-1] if book_bars else None
+    micro_bars = [b for b in bars if b.has_micro]
+    last_micro = micro_bars[-1] if micro_bars else None
+    rv = [b.realized_vol_bps for b in micro_bars if b.realized_vol_bps is not None]
+    lts = [
+        (b.large_trade_share, b.volume)
+        for b in micro_bars
+        if b.large_trade_share is not None and b.volume > 0
+    ]
     last_oi = next((b.oi for b in reversed(bars) if b.has_oi), None)
     last_fr = next((b.funding_rate for b in reversed(bars) if b.has_funding), None)
     last_mark = next((b.mark_close for b in reversed(bars) if b.has_mark), None)
@@ -150,6 +185,22 @@ def aggregate(bars: Sequence[UnifiedBar], tf: str, ts: int) -> UnifiedBar:
         funding_rate=last_fr,
         has_mark=last_mark is not None,
         mark_close=last_mark,
+        has_micro=bool(micro_bars),
+        ofi_l5=sum(b.ofi_l5 or 0.0 for b in micro_bars) if micro_bars else None,
+        ofi_l5_norm=(sum(b.ofi_l5_norm or 0.0 for b in micro_bars) / len(micro_bars))
+        if micro_bars
+        else None,
+        kyle_lambda_bps_per_1k=last_micro.kyle_lambda_15m_bps_per_1k if last_micro else None,
+        kyle_r2=last_micro.kyle_r2 if last_micro else None,
+        kyle_lambda_15m_bps_per_1k=last_micro.kyle_lambda_15m_bps_per_1k if last_micro else None,
+        vpin=last_micro.vpin if last_micro else None,
+        vpin_fast=last_micro.vpin_fast if last_micro else None,
+        realized_vol_bps=math.sqrt(sum(x * x for x in rv)) if rv else None,
+        trade_intensity=(sum(b.trade_intensity or 0.0 for b in micro_bars) / len(micro_bars))
+        if micro_bars
+        else None,
+        large_trade_share=(sum(a * v for a, v in lts) / sum(v for _, v in lts)) if lts else None,
+        max_run=max((b.max_run for b in micro_bars), default=0),
         source="rest" if all(b.source == "rest" for b in bars) else "live",
     )
 

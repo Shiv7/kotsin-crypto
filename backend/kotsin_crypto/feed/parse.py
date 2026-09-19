@@ -20,10 +20,11 @@ from .book import Level
 @dataclass(slots=True)
 class TradeEvt:
     symbol: str
-    ts_us: int
+    ts_us: int  # match-engine time
     price: float
     size: float
     taker_buy: bool
+    pub_ts_us: int = 0  # venue publish time (≈ 260 ms after the match)
 
 
 @dataclass(slots=True)

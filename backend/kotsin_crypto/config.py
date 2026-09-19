@@ -77,6 +77,17 @@ class Settings(BaseSettings):
     api_port: int = 8400
 
     engine_enabled: bool = True  # false → API only (tests, UI work without a feed)
+
+    # LLM committee (advisory; TradingAgents-shaped). Off unless enabled AND a key is present.
+    anthropic_api_key: SecretStr | None = None
+    committee_enabled: bool = False
+    committee_model: str = "claude-opus-5"
+    committee_interval_h: float = 4.0  # one regime decision per symbol per interval
+    committee_horizon_h: int = (
+        4  # decisions are scored against the vol-adjusted return over this horizon
+    )
+    committee_size_influence: bool = False  # true → size multiplier (0.5–1.0) applied to entries
+    committee_max_runs_per_day: int = 30  # cost guard
     paper_initial_usd: float = 10_000.0  # dummy wallet per strategy in PAPER mode
     backfill_hours: float = 6.0  # 1m history seeded from REST at boot
 

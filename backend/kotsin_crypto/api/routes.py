@@ -199,6 +199,80 @@ async def backtest_bars(
         raise HTTPException(404, f"unknown {exc}") from exc
 
 
+@router.get("/committee/status")
+async def committee_status(request: Request) -> dict[str, Any]:
+    return _engine(request).committee.status()
+
+
+@router.get("/committee/latest")
+async def committee_latest(request: Request) -> dict[str, Any]:
+    return _engine(request).committee.latest
+
+
+@router.get("/committee/log")
+async def committee_log(request: Request, limit: int = Query(50, le=500)) -> list[dict[str, Any]]:
+    entries = _engine(request).committee.log.entries
+    return [{k: v for k, v in e.items() if k not in ("run", "pack")} for e in entries[-limit:]][
+        ::-1
+    ]
+
+
+@router.get("/committee/entry/{entry_id}")
+async def committee_entry(request: Request, entry_id: str) -> dict[str, Any]:
+    e = next((x for x in _engine(request).committee.log.entries if x["id"] == entry_id), None)
+    if e is None:
+        raise HTTPException(404, "unknown entry")
+    return e
+
+
+class CommitteeRunBody(BaseModel):
+    symbol: str
+
+
+@router.post("/committee/run")
+async def committee_run(request: Request, body: CommitteeRunBody) -> dict[str, Any]:
+    eng = _engine(request)
+    if body.symbol not in eng.symbols:
+        raise HTTPException(404, f"unknown symbol {body.symbol}")
+    try:
+        entry = await eng.committee.run_symbol(body.symbol)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {k: v for k, v in entry.items() if k != "pack"}
+
+
+@router.get("/committee/labels")
+async def committee_labels(
+    request: Request, symbol: str, n: int = Query(600, le=3000)
+) -> dict[str, Any]:
+    from ..committee.labels import label_series
+
+    eng = _engine(request)
+    if symbol not in eng.symbols:
+        raise HTTPException(404, f"unknown symbol {symbol}")
+    bars = eng.store.bars(symbol, "5m", n)
+    z, labels = label_series([b.close for b in bars])
+    counts: dict[str, int] = {}
+    for lab in labels:
+        if lab is not None:
+            counts[lab.value] = counts.get(lab.value, 0) + 1
+    return {
+        "symbol": symbol,
+        "bars": len(bars),
+        "labelled": sum(counts.values()),
+        "distribution": counts,
+        "series": [
+            {
+                "ts": b.ts,
+                "close": b.close,
+                "z": None if not (z[i] == z[i]) else round(float(z[i]), 3),
+                "label": labels[i].value if labels[i] else None,
+            }
+            for i, b in enumerate(bars)
+        ],
+    }
+
+
 class ModeBody(BaseModel):
     mode: str
 

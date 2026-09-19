@@ -61,7 +61,8 @@ docker compose -f deploy/docker-compose.yml up --build
 | 4 | Backtester + cost model (next-open fills, intrabar stops, fees, funding, slippage; Parquet-cached history) | null strategy → 0 trades, 0 costs (tested); replays the live strategy/risk code | 🟡 built — UI page with trades on price |
 | 5 | Strategies CAN2 → FUDKII → BB-squeeze | artefact per strategy, ≥300 OOS trades, net edge > 0.15%/trade | 🟡 CAN2-crypto built (pipeline-test parameters, no edge claim) |
 | 6 | Risk + gateway (PAPER) + ledger | ≥2 weeks / ≥100 paper trades | 🟡 built — first 24h paper soak running |
-| 7 | API/WS + frontend: Overview, Chart (live forming candle), Signals, Trades, Risk, Backtest, Microstructure, Options, Market, System — IST/UTC toggle | all pages live off the paper run | 🟡 built |
+| 7 | API/WS + frontend: Overview, Chart (live forming candle), Signals, Trades, Risk, Backtest, Microstructure (Kyle λ, VPIN, OFI L1/L5, realised vol), Options, Market, Committee, System — IST/UTC toggle | all pages live off the paper run | 🟡 built |
+| 9b | LLM committee (TradingAgents-shaped, Trading-R1 grading) | graded log shows whether it adds value | 🟡 built, off until `KC_ANTHROPIC_API_KEY` |
 | 8 | Private WS, live orders, reconciliation → testnet LIVE → mainnet LIVE_CAPPED | 5 kill -9 restarts with open positions, zero unreconciled | ⬜ |
 
 Full table with rationale: `docs/ARCHITECTURE.md`.

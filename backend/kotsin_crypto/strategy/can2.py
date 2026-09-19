@@ -30,6 +30,14 @@ class Can2Config:
     sl_floor_pct: float = 0.15  # never place the stop closer than this % of price
     cooldown_bars: int = 6
     allow_short: bool = True
+    # Microstructure confirmation (live only — REST history has no tape, so these gates are
+    # FAIL_OPEN and a backtest cannot see them; the archive replay will). Off by default.
+    flow_gate: bool = False
+    flow_min_buy_ratio: float = (
+        0.55  # taker buy share of the trigger bar for a LONG (1 − this for a SHORT)
+    )
+    vpin_gate: bool = False
+    vpin_max: float = 0.7  # skip entries when flow toxicity (fast VPIN) is above this
 
     @property
     def min_history(self) -> int:
@@ -46,6 +54,8 @@ class Can2:
         self.g_surge = Gate("surge", OnMissing.FAIL_CLOSED)
         self.g_break = Gate("breakout", OnMissing.FAIL_CLOSED)
         self.g_vwap = Gate("vwap", OnMissing.FAIL_OPEN)
+        self.g_flow = Gate("flow", OnMissing.FAIL_OPEN, required=self.cfg.flow_gate)
+        self.g_vpin = Gate("vpin", OnMissing.FAIL_OPEN, required=self.cfg.vpin_gate)
 
     def on_bar(self, ctx: Context, bar: UnifiedBar) -> list[Signal]:
         cfg = self.cfg
@@ -84,10 +94,22 @@ class Can2:
             "atr_pct": atr / bar.close * 100,
         }
         k = cfg.k_surge
+        buy_ratio = bar.buy_volume / bar.volume if (bar.has_micro and bar.volume > 0) else None
+        vpin = bar.vpin_fast if bar.has_micro else None
+        evidence.update(
+            {
+                "buy_ratio": buy_ratio if buy_ratio is not None else -1.0,
+                "vpin_fast": vpin if vpin is not None else -1.0,
+            }
+        )
         long_gates = (
             self.g_surge.evaluate(surge, lambda v: v >= k, threshold=k),
             self.g_break.evaluate(bar.close, lambda v: v > hh, threshold=hh),
             self.g_vwap.evaluate(vwap, lambda v: bar.close > v, threshold=vwap),
+            self.g_flow.evaluate(
+                buy_ratio, lambda v: v >= cfg.flow_min_buy_ratio, threshold=cfg.flow_min_buy_ratio
+            ),
+            self.g_vpin.evaluate(vpin, lambda v: v <= cfg.vpin_max, threshold=cfg.vpin_max),
         )
         if chain_passed(long_gates):
             return [self._signal(ctx, bar, Side.LONG, long_gates, evidence, atr)]
@@ -96,6 +118,12 @@ class Can2:
                 self.g_surge.evaluate(surge, lambda v: v >= k, threshold=k),
                 self.g_break.evaluate(bar.close, lambda v: v < ll, threshold=ll),
                 self.g_vwap.evaluate(vwap, lambda v: bar.close < v, threshold=vwap),
+                self.g_flow.evaluate(
+                    buy_ratio,
+                    lambda v: v <= 1 - cfg.flow_min_buy_ratio,
+                    threshold=1 - cfg.flow_min_buy_ratio,
+                ),
+                self.g_vpin.evaluate(vpin, lambda v: v <= cfg.vpin_max, threshold=cfg.vpin_max),
             )
             if chain_passed(short_gates):
                 return [self._signal(ctx, bar, Side.SHORT, short_gates, evidence, atr)]

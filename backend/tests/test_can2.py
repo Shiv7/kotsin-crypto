@@ -46,9 +46,9 @@ def test_long_on_surge_and_breakout() -> None:
     s = sigs[0]
     assert s.side is Side.LONG and float(s.entry) == 102.5 and float(s.stop) < 102.5
     assert s.evidence["surge"] == 3.5
-    assert [g.name for g in s.gates] == ["surge", "breakout", "vwap"] and all(
-        g.passed for g in s.gates
-    )
+    assert [g.name for g in s.gates] == ["surge", "breakout", "vwap", "flow", "vpin"]
+    assert all(g.passed for g in s.gates)
+    assert all(g.missing for g in s.gates if g.name in ("flow", "vpin"))  # no tape → FAIL_OPEN
     assert len(s.signal_id) <= 32
     # cooldown: the very next bar cannot fire
     bars.append(_bar(len(bars), 102.5, 105.0, 102.0, 104.9, 400.0))

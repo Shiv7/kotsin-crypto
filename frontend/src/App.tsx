@@ -3,6 +3,7 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import { ModeBanner } from './components/ModeBanner'
 import { Backtest } from './pages/Backtest'
 import { Chart } from './pages/Chart'
+import { Committee } from './pages/Committee'
 import { Market } from './pages/Market'
 import { Micro } from './pages/Micro'
 import { Options } from './pages/Options'
@@ -23,6 +24,7 @@ const PAGES = [
   ['/micro', 'Microstructure'],
   ['/options', 'Options'],
   ['/market', 'Market'],
+  ['/committee', 'Committee'],
   ['/system', 'System'],
 ] as const
 
@@ -57,6 +59,7 @@ export default function App() {
             <Route path="/micro" element={<Micro />} />
             <Route path="/options" element={<Options />} />
             <Route path="/market" element={<Market />} />
+            <Route path="/committee" element={<Committee />} />
             <Route path="/system" element={<System />} />
           </Routes>
         </main>

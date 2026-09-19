@@ -22,6 +22,7 @@ export function Micro() {
   const asks = m?.book?.asks ?? []
   const maxCum = Math.max(bids.at(-1)?.cum ?? 0, asks.at(-1)?.cum ?? 0)
   const r = m?.rolling
+  const mi = m?.micro
   const ofiColor = (v: number | null | undefined) => (v == null ? 'text-slate-500' : v > 0 ? 'text-emerald-400' : v < 0 ? 'text-red-400' : 'text-slate-300')
   return (
     <section className="p-6 space-y-5">
@@ -42,6 +43,13 @@ export function Micro() {
         <Stat label="OFI 1m / 5m / 15m" value={<span className={ofiColor(r?.['5m']?.ofi)}>{fmt.int(r?.['5m']?.ofi)}</span>} sub={`${fmt.int(r?.['1m']?.ofi)} / ${fmt.int(r?.['5m']?.ofi)} / ${fmt.int(r?.['15m']?.ofi)} (best-quote order-flow imbalance, contracts)`} />
         <Stat label="taker buy ratio 5m" value={r?.['5m']?.buy_ratio == null ? 'DM' : `${(r['5m'].buy_ratio * 100).toFixed(0)}%`} sub={`buy ${fmt.int(r?.['5m']?.buy_volume)} / sell ${fmt.int(r?.['5m']?.sell_volume)} · 15m ${r?.['15m']?.buy_ratio == null ? 'DM' : (r['15m'].buy_ratio * 100).toFixed(0) + '%'}`} />
         <Stat label="OI / funding" value={fmt.int(m?.oi)} sub={m?.funding ? `${m.funding.rate_pct}% /8h · next ${fmt.hm(m.funding.next_ts)}` : 'DM'} />
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        <Stat label="Kyle λ (15m)" value={mi?.kyle_lambda_15m_bps_per_1k == null ? 'DM' : `${mi.kyle_lambda_15m_bps_per_1k.toFixed(3)} bps/1k`} sub={`price impact per 1,000 contracts · 1m est ${mi?.kyle_lambda_bps_per_1k == null ? 'DM' : mi.kyle_lambda_bps_per_1k.toFixed(3)} (R² ${mi?.kyle_r2 == null ? 'DM' : mi.kyle_r2.toFixed(2)})`} />
+        <Stat label="VPIN" value={mi?.vpin == null ? 'DM' : mi.vpin.toFixed(3)} sub={`daily buckets · fast ${mi?.vpin_fast == null ? 'DM' : mi.vpin_fast.toFixed(3)} · bucket ${mi?.daily_volume ? fmt.int(mi.daily_volume / 50) : 'DM'} contracts`} />
+        <Stat label="OFI L5 (1m)" value={<span className={ofiColor(mi?.ofi_l5)}>{fmt.int(mi?.ofi_l5)}</span>} sub={`depth-normalised ${mi?.ofi_l5_norm == null ? 'DM' : mi.ofi_l5_norm.toFixed(3)} · top-5 levels of ob_l2`} />
+        <Stat label="realised vol (1m)" value={mi?.realized_vol_bps == null ? 'DM' : `${mi.realized_vol_bps.toFixed(1)} bps`} sub={mi?.realized_vol_bps == null ? '' : `≈ ${(mi.realized_vol_bps * Math.sqrt(525600) / 100).toFixed(0)}% annualised from 5 s mid returns`} />
+        <Stat label="tape" value={mi?.trade_intensity == null ? 'DM' : `${mi.trade_intensity.toFixed(2)} tr/s`} sub={`large-trade share ${mi?.large_trade_share == null ? 'DM' : (mi.large_trade_share * 100).toFixed(0) + '%'} · longest run ${mi?.max_run ?? 'DM'}`} />
       </div>
       <div className="grid md:grid-cols-2 gap-6">
         <div>
@@ -70,8 +78,8 @@ export function Micro() {
         <div>
           <h2 className="text-sm text-slate-400 mb-2">Last 15 one-minute bars {m?.forming_1m ? `· forming: ${m.forming_1m.trade_count} trades, vol ${Math.round(m.forming_1m.volume)}, buy ${Math.round(m.forming_1m.buy_volume)}` : ''}</h2>
           <Table
-            head={['time', 'close', 'vol', 'buy', 'sell', 'trades', 'OFI', 'imb', 'spread', 'micro', 'src']}
-            rows={[...(m?.recent_1m ?? [])].reverse().map((b: Snapshot) => [fmt.hm(b.ts), fmt.px(b.close), fmt.int(b.volume), fmt.int(b.buy_volume), fmt.int(b.sell_volume), b.trade_count, <span className={ofiColor(b.ofi)}>{b.ofi == null ? 'DM' : fmt.int(b.ofi)}</span>, b.imbalance == null ? 'DM' : fmt.signed(b.imbalance, 2), b.spread_bps == null ? 'DM' : b.spread_bps.toFixed(2), fmt.px(b.microprice), b.source])}
+            head={['time', 'close', 'vol', 'buy', 'sell', 'trades', 'OFI L1', 'OFI L5n', 'imb', 'spread', 'Kyle bps/1k', 'VPIN fast', 'rv bps', 'src']}
+            rows={[...(m?.recent_1m ?? [])].reverse().map((b: Snapshot) => [fmt.hm(b.ts), fmt.px(b.close), fmt.int(b.volume), fmt.int(b.buy_volume), fmt.int(b.sell_volume), b.trade_count, <span className={ofiColor(b.ofi)}>{b.ofi == null ? 'DM' : fmt.int(b.ofi)}</span>, <span className={ofiColor(b.ofi_l5)}>{b.ofi_l5 == null ? 'DM' : b.ofi_l5.toFixed(2)}</span>, b.imbalance == null ? 'DM' : fmt.signed(b.imbalance, 2), b.spread_bps == null ? 'DM' : b.spread_bps.toFixed(2), b.kyle == null ? 'DM' : b.kyle.toFixed(3), b.vpin == null ? 'DM' : b.vpin.toFixed(2), b.rv == null ? 'DM' : b.rv.toFixed(1), b.source])}
           />
         </div>
       </div>

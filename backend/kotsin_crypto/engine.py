@@ -16,10 +16,11 @@ from typing import Any
 import structlog
 
 from .bars.backfill import fetch_1m
-from .bars.book_bar import BookBarBuilder
+from .bars.micro import MicroBuilder
 from .bars.trade_bar import TradeBar, TradeBarBuilder
 from .bars.unified import BarStore, UnifiedBar, merge_1m
 from .bus import Bus
+from .committee.service import CommitteeService
 from .config import Settings
 from .domain import (
     ExitDecision,
@@ -88,6 +89,7 @@ class Engine:
         self.catalogue: Catalogue | None = None
         self.market = MarketData(self.rest)
         self.backtests: BacktestJobs | None = None
+        self.committee = CommitteeService(self, settings)
         self.ledger = Ledger(settings.db_url)
         self.control: dict[str, Any] = {"mode": "SHADOW", "halted": False, "halt_reason": ""}
 
@@ -96,7 +98,7 @@ class Engine:
         self.trade_builders: dict[str, TradeBarBuilder] = {
             s: TradeBarBuilder(s) for s in self.symbols
         }
-        self.book_builders: dict[str, BookBarBuilder] = {s: BookBarBuilder(s) for s in self.symbols}
+        self.micro_builders: dict[str, MicroBuilder] = {s: MicroBuilder(s) for s in self.symbols}
         self.store = BarStore(self.symbols)
         self.marks: dict[str, float] = {}
         self.last_price: dict[str, float] = {}
@@ -183,6 +185,17 @@ class Engine:
             self.positions[pos.id] = pos
 
         for sym in self.symbols:
+            try:
+                t = await self.rest.ticker(sym)
+                # ticker "size" is 24h volume in CONTRACTS; "volume" is in the underlying unit (BTC)
+                daily_volume = float(t.get("size") or 0) or None
+                if daily_volume is None and t.get("volume"):
+                    cv = float(self.catalogue.by_symbol(sym).contract_value)
+                    daily_volume = float(t["volume"]) / cv if cv else None
+            except Exception as exc:
+                log.warning("daily_volume_unavailable", symbol=sym, error=str(exc))
+                daily_volume = None
+            self.micro_builders[sym] = MicroBuilder(sym, daily_volume=daily_volume)
             bars = await fetch_1m(self.rest, sym, hours=s.backfill_hours)
             for b in bars:
                 self.store.add_1m(b)
@@ -198,6 +211,7 @@ class Engine:
             asyncio.create_task(self.archive.run(self.stop_event), name="archive"),
             asyncio.create_task(self._clock(), name="clock"),
             asyncio.create_task(self._db_writer(), name="db"),
+            asyncio.create_task(self.committee.run(self.stop_event), name="committee"),
         ]
         await self.ledger.event(
             "boot",
@@ -278,24 +292,21 @@ class Engine:
         now = recv_us / 1e6
         if isinstance(evt, TradeEvt):
             self.last_price[evt.symbol] = evt.price
+            self.micro_builders[evt.symbol].on_trade(
+                evt.pub_ts_us or evt.ts_us, evt.price, evt.size, evt.taker_buy
+            )
             bars = self.trade_builders[evt.symbol].on_trade(
                 evt.ts_us, evt.price, evt.size, evt.taker_buy
             )
             if bars:
                 self._on_1m_bars(evt.symbol, bars, now)
         elif isinstance(evt, L1Evt):
-            book = self.books[evt.symbol]
-            self.book_builders[evt.symbol].on_book(
-                evt.ts_us,
-                evt.bid,
-                evt.bid_size,
-                evt.ask,
-                evt.ask_size,
-                book.depth("bid", 5),
-                book.depth("ask", 5),
+            self.micro_builders[evt.symbol].on_quote(
+                evt.ts_us, evt.bid, evt.bid_size, evt.ask, evt.ask_size
             )
         elif isinstance(evt, L2Evt):
             self.books[evt.symbol].replace(evt.bids, evt.asks, evt.ts_us)
+            self.micro_builders[evt.symbol].on_l2(evt.ts_us, evt.bids, evt.asks)
         elif isinstance(evt, MarkEvt):
             self.marks[evt.symbol] = evt.price
             self._check_stops(evt.symbol, evt.price, now)
@@ -316,7 +327,7 @@ class Engine:
     def _on_1m_bars(self, symbol: str, bars: list[TradeBar], now: float) -> None:
         connect_ts = self.ws.connect_ts or 0.0
         for tb in bars:
-            book_bar = self.book_builders[symbol].close(tb.ts)
+            book_bar = self.micro_builders[symbol].close(tb.ts)
             # A minute that started before the socket (re)connected is missing its first trades:
             # keep it (one minute inside a 5m bar) but tag it and keep it out of the determinism check.
             partial = tb.trade_count > 0 and tb.ts < connect_ts
@@ -513,11 +524,20 @@ class Engine:
         if not sizing.ok:
             return reject(Decision.REJECTED_RISK.value, f"sizing: {sizing.reason}")
 
+        contracts = sizing.contracts
+        cm, cwhy = self.committee.size_multiplier(sig.symbol, sig.side.value)
+        record["committee"] = {
+            "multiplier": cm,
+            "why": cwhy,
+            "applied": self.settings.committee_size_influence and cm < 1.0,
+        }
+        if self.settings.committee_size_influence and cm < 1.0:
+            contracts = max(1, int(contracts * cm))
         intent = OrderIntent(
             strategy=key,
             symbol=sig.symbol,
             side=OrderSide.BUY if sig.side is Side.LONG else OrderSide.SELL,
-            contracts=sizing.contracts,
+            contracts=contracts,
             purpose=Purpose.ENTRY,
             signal_id=sig.signal_id,
             client_order_id=sig.signal_id,
@@ -910,6 +930,24 @@ class Engine:
             }
             if forming
             else None,
+            "micro": (
+                {
+                    "kyle_lambda_bps_per_1k": last.kyle_lambda_bps_per_1k,
+                    "kyle_r2": last.kyle_r2,
+                    "kyle_lambda_15m_bps_per_1k": last.kyle_lambda_15m_bps_per_1k,
+                    "vpin": last.vpin,
+                    "vpin_fast": last.vpin_fast,
+                    "ofi_l5": last.ofi_l5,
+                    "ofi_l5_norm": last.ofi_l5_norm,
+                    "realized_vol_bps": last.realized_vol_bps,
+                    "trade_intensity": last.trade_intensity,
+                    "large_trade_share": last.large_trade_share,
+                    "max_run": last.max_run,
+                    "daily_volume": self.micro_builders[symbol].daily_volume,
+                }
+                if (last := next((b for b in reversed(bars) if b.has_micro), None))
+                else None
+            ),
             "recent_1m": [
                 {
                     "ts": b.ts,
@@ -923,6 +961,10 @@ class Engine:
                     "spread_bps": b.spread_bps,
                     "imbalance": b.depth_imbalance,
                     "vwap": b.vwap,
+                    "kyle": b.kyle_lambda_bps_per_1k,
+                    "vpin": b.vpin_fast,
+                    "rv": b.realized_vol_bps,
+                    "ofi_l5": b.ofi_l5_norm,
                     "source": b.source,
                 }
                 for b in bars
@@ -995,6 +1037,7 @@ class Engine:
             },
             "positions": [self.position_view(p) for p in self.positions.values()],
             "db_queue": self._db_queue.qsize(),
+            "committee": self.committee.status(),
         }
         if brief:
             snap["candle_check"] = {k: v for k, v in self.candle_check.items() if k != "examples"}

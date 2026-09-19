@@ -86,6 +86,34 @@ Delta's **REST** candles bucket by trade time and match our bars exactly (602 = 
 stream is complete (every REST trade is on our tape). Therefore `rest_check` (every 5 min, weight 3) is
 the authoritative determinism metric; `candle_check` (vs the WS candle) is kept as a boundary-shift counter.
 
+## Microstructure metrics (`bars/micro.py`)
+
+Per minute, from the tape (taker side known), L1 quotes (10/s) and L2 snapshots (2/s): Kyle's λ (OLS of
+Δmid on signed volume over 5 s sub-buckets; 1m and rolling 15m; normalised to bps per 1,000 contracts),
+VPIN (real taker side; daily-bucket and fast variants; bucket = 24h contract volume / 50 or / 500),
+best-quote OFI (L1) and multi-level OFI (top-5 ranks of L2, depth-normalised), realised vol from 5 s
+mid returns, trade intensity, large-trade share, longest same-side run. Live only — REST history has no
+tape, so strategy gates on these are `FAIL_OPEN` and the backtester cannot see them until the archive
+replay exists. CAN2 exposes optional `flow_gate` / `vpin_gate`.
+
+## Feed latency (measured 2026-09-20, Mac clock within 2 ms of NTP)
+
+| Path | median | p90 | p99 |
+|---|---|---|---|
+| Delta publish → our receive (trades, mark) | 60 ms | 61 ms | 65 ms |
+| Delta publish → our receive (ob_l1 / ob_l2) | 69 ms | 73 ms | 76 ms |
+| match engine → publish (trades, venue-internal) | 258 ms | 462 ms | 505 ms |
+| ticker snapshot age | ~2 s | 3.7 s | 4.9 s |
+
+Update cadence: ob_l1 every 100 ms, ob_l2 every 500 ms, ticker every ~4.4 s, trades bursty. So a trade
+reaches the engine ≈ 320 ms after it matched (p99 ≈ 570 ms) and the best quote is never staler than
+≈ 170 ms — fine for 5-minute strategies, not a basis for sub-second ones.
+
+## LLM committee (`committee/`)
+
+See `docs/RESEARCH_NOTES.md`. Runs on its own task; the engine reads `committee.size_multiplier()`
+at sizing time only when `KC_COMMITTEE_SIZE_INFLUENCE=true`.
+
 ## Mode and arming
 
 `Mode ∈ {SHADOW, PAPER, LIVE_CAPPED, LIVE}` is a row in the `control` table. `LIVE*` requires an explicit

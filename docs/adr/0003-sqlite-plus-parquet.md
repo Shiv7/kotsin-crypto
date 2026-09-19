@@ -9,7 +9,10 @@ speed and columnar reads for research. Neither needs a server on a personal box.
 ## Decision
 - `data/kotsin_crypto.db`: SQLite in WAL mode via SQLAlchemy async — orders, fills, positions, trades,
   wallet snapshots, signals (incl. rejections), control.
-- `data/archive/<channel>/<yyyy-mm-dd>.parquet`: every raw WS event, flushed every few seconds.
+- `data/archive/<channel>/<yyyy-mm-dd>/<HH>.jsonl`: every raw WS event as `{"t":recv_µs,"m":payload}`,
+  flushed every 5 s. **Refined 2026-09-20:** JSONL on the hot path (plain appends are crash-safe; a
+  Parquet file without its footer is unreadable), compacted to Parquet by a research job. ~0.6 MB/min for
+  three symbols with `ob_l1` + `ob_l2` (≈ 0.8 GB/day).
 - DuckDB queries the archive directly for backtests and reports.
 - JSONL export of closed trades (same shape as the NSE ledger, plus funding/leverage/mark fields) for
   durability and diffing.

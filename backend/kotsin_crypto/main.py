@@ -15,8 +15,10 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api.routes import router as api_router
+from .api.ws import router as ws_router
 from .bus import Bus
 from .config import Settings, assert_no_unknown_env
+from .engine import Engine
 from .log import configure_logging
 from .ops.telegram import Telegram
 
@@ -49,13 +51,22 @@ def create_app(settings: Settings | None = None, *, frontend_dist: Path = FRONTE
             f"kotsin-crypto {__version__} up · {settings.delta_env.value} · "
             f"{','.join(settings.symbol_list)}"
         )
-        # Step 2+: start engine tasks here (feed → bars → strategies → risk → gateway).
-        yield
-        await app.state.telegram.send("kotsin-crypto down")
-        await app.state.telegram.aclose()
+        app.state.engine = None
+        if settings.engine_enabled:
+            engine = Engine(settings, app.state.bus, app.state.telegram)
+            await engine.start()
+            app.state.engine = engine
+        try:
+            yield
+        finally:
+            if app.state.engine is not None:
+                await app.state.engine.stop()
+            await app.state.telegram.send("kotsin-crypto down")
+            await app.state.telegram.aclose()
 
     app = FastAPI(title="kotsin-crypto", version=__version__, lifespan=lifespan)
     app.include_router(api_router, prefix="/api")
+    app.include_router(ws_router)
     mount_ui(app, frontend_dist)  # must be last: it registers a catch-all route
     return app
 

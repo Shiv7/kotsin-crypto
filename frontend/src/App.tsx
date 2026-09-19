@@ -19,7 +19,7 @@ const PAGES = [
 ] as const
 
 export default function App() {
-  const { health, refresh } = useEngine()
+  const { health, error, refresh } = useEngine()
   useEffect(() => {
     void refresh()
     const id = setInterval(() => void refresh(), 5000)
@@ -28,24 +28,17 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <ModeBanner mode={health?.mode} deltaEnv={health?.delta_env} />
+      <ModeBanner health={health} error={error} />
       <div className="flex min-h-screen">
         <nav className="w-44 border-r border-slate-800 p-3 space-y-1">
           <div className="px-2 pb-3 text-sm font-bold tracking-wide">kotsin-crypto</div>
           {PAGES.map(([to, label]) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                `block rounded px-2 py-1 text-sm ${isActive ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`
-              }
-            >
+            <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `block rounded px-2 py-1 text-sm ${isActive ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}>
               {label}
             </NavLink>
           ))}
         </nav>
-        <main className="flex-1">
+        <main className="flex-1 min-w-0">
           <Routes>
             <Route path="/" element={<Overview />} />
             <Route path="/chart" element={<Chart />} />

@@ -69,6 +69,14 @@ All of this is **one asyncio process**. Stages are connected by bounded in-proce
 Boundaries enforced by `import-linter` (`backend/pyproject.toml`): `strategy` may not import `venue`,
 `exec`, `ledger`, `api`, `ops` or `feed`; `exec` may not import `strategy`; `venue` is a leaf.
 
+## Feed rules learned in the first soak
+
+- The minute during which the socket (re)connects is missing its first trades: it is tagged
+  `source="partial"`, kept for indicators, and excluded from the Delta candle cross-check.
+- `HALT` (API / UI / Telegram) blocks new entries **and flattens every open position** at mark; exits
+  are always allowed through the gateway even while halted.
+- Funding is accrued on the 1 s clock when `now ≥ nfr` for an open position, once per realization.
+
 ## Mode and arming
 
 `Mode ∈ {SHADOW, PAPER, LIVE_CAPPED, LIVE}` is a row in the `control` table. `LIVE*` requires an explicit

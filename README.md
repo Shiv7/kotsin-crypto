@@ -36,12 +36,13 @@ docs/       ARCHITECTURE, DELTA_INDIA_FACTS, LEARNINGS, ADRs, strategy docs
 
 ```bash
 # backend
-cp .env.example backend/.env          # fill in TESTNET keys; .env is git-ignored
+cp .env.example backend/.env          # keys optional: the paper engine only uses PUBLIC endpoints; .env is git-ignored
 cd backend
 uv sync                               # creates .venv with Python 3.12 (arm64/x86 chosen by uv)
 uv run pytest -m "not live" -q        # unit tests, offline
 uv run pytest -m live -q              # hits Delta's public API (no key needed)
-uv run kotsin-crypto                  # http://127.0.0.1:8400/api/health
+KC_DELTA_ENV=mainnet uv run kotsin-crypto   # http://127.0.0.1:8400  (UI) · /api/health · /api/system
+curl -X POST localhost:8400/api/control/mode -H 'Content-Type: application/json' -d '{"mode":"PAPER"}'
 
 # frontend (dev server proxies /api and /ws to :8400)
 cd ../frontend && npm install && npm run dev
@@ -55,12 +56,12 @@ docker compose -f deploy/docker-compose.yml up --build
 | Step | What | Done when | State |
 |---|---|---|---|
 | 1 | Skeleton, closed config, bus, Delta REST client + product catalogue, Telegram, CI | boot fails on a misspelled key; CI green; `pytest -m live` sees BTCUSD | ✅ |
-| 2 | Public WS feed + Parquet archive + L2 book maintainer | 24h unattended, zero unrecovered gaps | ⬜ |
-| 3 | 1m trade/book/OI bars, UnifiedBar, REST backfill | bars rebuilt from the archive are byte-identical to live bars | ⬜ |
+| 2 | Public WS feed + JSONL archive + L2 book | 24h unattended, zero unrecovered gaps | 🟡 built — 24h soak running |
+| 3 | 1m trade/book/OI bars, UnifiedBar, REST backfill | live 1m bars match Delta's `candlestick_1m`; archive replay byte-identical | 🟡 built — live check vs Delta candles running |
 | 4 | Backtester + cost model | a null strategy backtests to exactly −fees −funding | ⬜ |
-| 5 | Strategies CAN2 → FUDKII → BB-squeeze | artefact per strategy, ≥300 OOS trades, net edge > 0.15%/trade | ⬜ |
-| 6 | Risk + gateway (PAPER) + ledger | ≥2 weeks / ≥100 paper trades | ⬜ |
-| 7 | API/WS + frontend pages | all six pages live off the paper run | ⬜ |
+| 5 | Strategies CAN2 → FUDKII → BB-squeeze | artefact per strategy, ≥300 OOS trades, net edge > 0.15%/trade | 🟡 CAN2-crypto built (pipeline-test parameters, no edge claim) |
+| 6 | Risk + gateway (PAPER) + ledger | ≥2 weeks / ≥100 paper trades | 🟡 built — first 24h paper soak running |
+| 7 | API/WS + frontend pages | all six pages live off the paper run | 🟡 built |
 | 8 | Private WS, live orders, reconciliation → testnet LIVE → mainnet LIVE_CAPPED | 5 kill -9 restarts with open positions, zero unreconciled | ⬜ |
 
 Full table with rationale: `docs/ARCHITECTURE.md`.

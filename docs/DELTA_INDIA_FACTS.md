@@ -32,6 +32,27 @@ used. Re-verify anything marked *(check)* before relying on it in live code.
   `ob_updates` ≤ **100 symbols per connection**, published every 100 ms, snapshot then incremental
   updates with `seq` + checksum `cs`.
 
+## Public WebSocket (verified live 2026-09-20)
+
+The public socket accepts only the **short** channel names; the long names in older docs are rejected
+("subscription forbidden on this invalid channel"):
+
+| Channel | Subscribe symbols | Payload (compact) | Rate seen (3 symbols) |
+|---|---|---|---|
+| `ticker` | `BTCUSD` | `{"d":[{"m":mark,"oi":[contracts,…],"q":[bid,bidSz,ask,askSz,…],"pb":[lo,hi],"to":[usd,…]}],"sp":spot,"sy","ts"}` | 0.5/s, 395 B |
+| `ob_l1` | `BTCUSD` | `{"bp","bs","ap","as","lts","sy","ts"}` | 30/s, 128 B |
+| `ob_l2` | `BTCUSD` | `{"b":[[px,sz]…15],"a":[[px,sz]…15],"lts","sy","ts"}` | 6/s, 660 B |
+| `ob_updates` | `BTCUSD` | snapshot (`action:"snapshot"`, ~2.5k levels/side, `seq`, `cs`) then `action:"update"` deltas | 3.6/s, 1.9 KB (BTC alone) |
+| `trades` | `BTCUSD` | `{"p","s","r","sy","t","ts"}` — **`r:"t"` ⇔ the buyer was the taker** (verified 18/18 vs REST `buyer_role`) | 2/s, 104 B |
+| `mark_price` | `MARK:BTCUSD` | `{"p","sy":"MARK:BTCUSD","ts"}` | 1.6/s |
+| `candlestick_1m` | `BTCUSD` | `{"o","h","l","c","v","cst","res","sy","ts"}` — forming candle; final when `cst` advances | 1/s |
+| `funding_rate` | `BTCUSD` | `{"fr","fi":28800,"nfr","sy","ts"}` — **`fr` is a percent per 8 h interval** (0.01 = 0.01%; ×3×365 = the product's `annualized_funding` 10.95) | rare |
+| `spot_price` | `.DEXBTUSD` | `{"p","sy","ts"}` | 2/s |
+| `system_status` | none | `{"event","status","maintenance_*","timestamp"}` | on change |
+
+Heartbeats arrive every ~5 s after `{"type":"enable_heartbeat"}`. A subscribe with any malformed entry
+fails as a whole ("Invalid channel array").
+
 ## REST endpoints used
 
 | Purpose | Call |

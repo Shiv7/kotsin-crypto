@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8400
 
+    engine_enabled: bool = True  # false → API only (tests, UI work without a feed)
+    paper_initial_usd: float = 10_000.0  # dummy wallet per strategy in PAPER mode
+    backfill_hours: float = 6.0  # 1m history seeded from REST at boot
+
     @field_validator("symbols")
     @classmethod
     def _symbols_nonempty(cls, v: str) -> str:

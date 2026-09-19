@@ -1,8 +1,8 @@
 # LIVE checklist — first real orders on Delta Exchange India
 
 Read top to bottom before arming. Every step names the code that enforces it; a step that lives only
-here is not a safeguard. Nothing below has been exercised against the venue with real orders yet —
-the unit tests run against fakes and mock transports (see `backend/tests/test_live_executor.py`,
+here is not a safeguard. §2 was executed on the Delta testnet (demo USD) on 2026-09-19/20 with real
+orders — see §7 for what was verified. The unit tests run against fakes and mock transports (see `backend/tests/test_live_executor.py`,
 `test_reconcile.py`, `test_gateway_live.py`, `test_arming.py`, `test_delta_rest_writes.py`).
 
 ## 0. What "live" means here
@@ -94,3 +94,31 @@ the first order; the venue default is 200× — `LiveExecutor.ensure_leverage`).
 - Fill detection polls `GET /v2/orders/{id}` every 0.5 s for 10 s (private-WS `orders` updates
   short-circuit it); a market order that has not filled in 10 s is reported `UNFILLED` and the
   reconciler adopts whatever the venue actually did.
+
+
+## 7. Verified on testnet (demo USD), 2026-09-19 21:45–21:55 UTC
+
+Instance on port 8402 with `backend/.env.testnet`, `KC_LIVE_LEVERAGE=5`, armed `LIVE_CAPPED` for 1 h.
+Each step below was checked against the venue's own REST view, not just our logs.
+
+| Step | Result |
+|---|---|
+| Auth + private WS `key-auth` | connected, authenticated, fills/orders/positions received |
+| Leverage | BTCUSD read `10` (testnet default) → set `5` → re-read `5` before the first order |
+| Entry (probe LONG 1 BTCUSD) | market fill 81,060.5, taker fee $0.043 (= 0.05 %), venue position size 1, margin $16.21, liquidation 65,051 |
+| Bracket stop | rests as a **separate order**: `order_type=market_order`, `stop_order_type=stop_loss_order`, `reduce_only=true`, `bracket_order=true`, `stop_trigger_method=mark_price`, **state `pending`** (not `open`) — query `states=open,pending`; the position object carries no bracket fields |
+| Exit (probe) | `live_stops_cancelled 1` → reduce-only market fill 81,094.0 → venue flat, 0 orders, trade row net −$0.053 |
+| Kill drill (SHORT 1 ETHUSD open) | halt kept `manual kill (API)`, `DELETE /orders/all` + `POST /positions/close_all` → venue auto-fill, reconcile closed local as `RECONCILED`, venue flat |
+| Restart drill (LONG 1 BTCUSD open) | SIGTERM → relaunch → reconcile venue==local, resting stop intact, exit after restart filled, wallet == venue balance |
+
+Bugs found by this run (fixed before mainnet): the paper wallet's $10k baseline made the first venue
+sync look like a −$9,900 day and tripped the daily-loss cap (`Wallet.rebaseline` on first sync);
+the reconciler counted only `open` orders so a pending bracket stop was invisible (`states=open,pending`);
+fees were briefly double-counted between the venue debit and the next sync (post-fill sync).
+
+## 8. Mainnet (₹2,000 burner account) — go/no-go
+
+Balance $24.17. Caps unchanged (BTCUSD/ETHUSD, 1 contract, 2 positions, 6 orders/day, 5×, $3 daily
+loss). One BTCUSD contract ≈ $81 notional ≈ 3.4× — inside the 5× cap; ETHUSD ≈ $26. Expect ~$0.08
+of fees per BTC round trip. This is a plumbing confirmation on real settlement, not a P&L exercise; the
+strategy's parameters are still the pipeline-test values that lose in backtests.

@@ -273,6 +273,89 @@ async def committee_labels(
     }
 
 
+class ProbeBody(BaseModel):
+    symbol: str
+    side: str = "LONG"
+    confirm: bool = False
+
+
+@router.post("/control/probe")
+async def probe_entry(request: Request, body: ProbeBody) -> dict[str, Any]:
+    """Plumbing test: push a synthetic 1-contract-sized signal through the PRODUCTION entry path
+    (risk → gateway → paper/live executor). Requires confirm=true. In a live mode this places a real
+    order under the LIVE_CAPPED caps."""
+    from decimal import Decimal
+
+    from ..strategy.base import Side, Signal
+    from ..strategy.keys import StrategyKey
+
+    eng = _engine(request)
+    if not body.confirm:
+        raise HTTPException(400, "set confirm=true to run a probe")
+    if body.symbol not in eng.symbols:
+        raise HTTPException(404, f"unknown symbol {body.symbol}")
+    side = Side.LONG if body.side.upper() == "LONG" else Side.SHORT
+    mark = eng.marks.get(body.symbol) or eng.last_price.get(body.symbol)
+    if not mark:
+        raise HTTPException(409, "no mark price yet")
+    bars = eng.store.bars(body.symbol, "5m", 20)
+    if not bars:
+        raise HTTPException(409, "no bars yet")
+    trs = [
+        max(b.high - b.low, abs(b.high - bars[i - 1].close), abs(b.low - bars[i - 1].close))
+        for i, b in enumerate(bars)
+        if i > 0
+    ]
+    atr = sum(trs[-14:]) / max(1, len(trs[-14:])) if trs else mark * 0.003
+    dist = max(1.5 * atr, mark * 0.003)
+    stop = mark - dist if side is Side.LONG else mark + dist
+    now = time.time()
+    sig = Signal(
+        strategy=StrategyKey.CAN2,
+        symbol=body.symbol,
+        side=side,
+        ts=int(now),
+        entry=Decimal(str(mark)),
+        stop=Decimal(str(round(stop, 8))),
+        confidence=1.0,
+        reason="PROBE (manual plumbing test)",
+        evidence={"atr": atr, "surge": 0.0},
+    )
+    before = set(eng.positions)
+    eng._on_signal(sig, bars[-1], now)
+    return {
+        "signal_id": sig.signal_id,
+        "mark": mark,
+        "stop": stop,
+        "mode": eng.control.get("mode"),
+        "positions_before": sorted(before),
+        "recent_signal": eng.recent_signals[0] if eng.recent_signals else None,
+    }
+
+
+class ProbeExitBody(BaseModel):
+    position_id: str
+    confirm: bool = False
+
+
+@router.post("/control/probe_exit")
+async def probe_exit(request: Request, body: ProbeExitBody) -> dict[str, Any]:
+    """Close one position through the PRODUCTION exit path (manual reason)."""
+    from ..domain import ExitDecision, ExitReason
+
+    eng = _engine(request)
+    if not body.confirm:
+        raise HTTPException(400, "set confirm=true to run a probe exit")
+    pos = eng.positions.get(body.position_id)
+    if pos is None:
+        raise HTTPException(404, "unknown or closed position")
+    mark = eng.marks.get(pos.symbol) or eng.last_price.get(pos.symbol) or pos.entry
+    eng._close_position(
+        pos, ExitDecision(pos.id, ExitReason.MANUAL, mark, "probe exit"), time.time()
+    )
+    return {"position_id": pos.id, "status": pos.status, "mode": eng.control.get("mode")}
+
+
 class ModeBody(BaseModel):
     mode: str
     arm_hours: float | None = None  # required for LIVE_CAPPED / LIVE (0.5–24)

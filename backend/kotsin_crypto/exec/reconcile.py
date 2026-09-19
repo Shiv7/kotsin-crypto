@@ -61,6 +61,7 @@ class ReconcileReport:
     local_positions: dict[str, int] = field(default_factory=dict)
     open_orders: int = 0
     balance: float | None = None
+    rebaselined: bool = False
     error: str | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -74,6 +75,7 @@ class ReconcileReport:
             "local_positions": dict(self.local_positions),
             "open_orders": self.open_orders,
             "balance": self.balance,
+            "rebaselined": self.rebaselined,
             "error": self.error,
         }
 
@@ -189,7 +191,14 @@ class Reconciler:
                     rep.closed.append(f"{sym} {pos.id}")
         if rep.balance is not None:
             for w in eng.wallets.values():
-                if abs(w.balance - rep.balance) > 1e-6:
+                if not w.venue_synced:
+                    # first sync: the paper wallet's $10k baseline must not be compared with the
+                    # venue's real balance, or the daily-loss cap trips on a phantom −$9,900 day
+                    w.rebaseline(rep.balance, time.time())
+                    rep.rebaselined = True
+                    w.updated_ts = now
+                    eng._persist(eng.ledger.upsert_wallet(w.strategy, w.to_json()))
+                elif abs(w.balance - rep.balance) > 1e-6:
                     w.balance = rep.balance
                     w.peak = max(w.peak, w.balance)
                     w.updated_ts = now

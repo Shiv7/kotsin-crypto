@@ -96,3 +96,14 @@ def test_time_stop() -> None:
     p = _pos(PosSide.LONG)
     assert ex.on_clock(p, 100.0, 50.0) is None
     assert ex.on_clock(p, 100.0, 101.0).reason is ExitReason.TIME_STOP
+
+
+def test_rebaseline_adopts_venue_balance_and_clears_phantom_daily_loss() -> None:
+    w = Wallet.new("CAN2", 10_000, now=1_700_000_000)
+    w.balance = 100.0  # what a naive venue sync did
+    assert w.check_breakers(LIM, 1_700_000_001).startswith("DAILY_LOSS")
+    w.rebaseline(100.0, 1_700_000_002)
+    assert w.initial == w.peak == w.day_start_balance == w.balance == 100.0
+    assert w.day_pnl == 0.0 and not w.halted and w.venue_synced
+    w.balance = 99.0  # later syncs only move the balance
+    assert abs(w.day_pnl - (-1.0)) < 1e-9

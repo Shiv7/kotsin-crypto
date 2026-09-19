@@ -31,6 +31,7 @@ class Wallet:
     losses: int = 0
     halted: bool = False
     halt_reason: str = ""
+    venue_synced: bool = False  # True once the balance has been adopted from the exchange
     updated_ts: float = field(default_factory=time.time)
 
     @classmethod
@@ -80,6 +81,19 @@ class Wallet:
             self.halted, self.halt_reason = False, ""
         self.updated_ts = now
         return True
+
+    def rebaseline(self, balance: float, now: float) -> None:
+        """Adopt the exchange balance as the new starting point (first live sync): initial, peak and
+        day-start all move to it, so day P&L and drawdown are measured from the real account, not from
+        the paper wallet's notional starting capital."""
+        self.initial = self.balance = self.peak = self.day_start_balance = balance
+        self.day = utc_day(now)
+        if self.halted and (
+            self.halt_reason.startswith("DAILY_LOSS") or self.halt_reason.startswith("DRAWDOWN")
+        ):
+            self.halted, self.halt_reason = False, ""
+        self.venue_synced = True
+        self.updated_ts = now
 
     def apply_fee(self, fee: float, now: float) -> None:
         self.balance -= fee

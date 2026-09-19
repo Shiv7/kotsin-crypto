@@ -472,6 +472,8 @@ class Engine:
                     self.telegram.send(f"VENUE {evt.reason} on {evt.symbol}: order {evt.order_id}")
                 )
         elif isinstance(evt, PositionEvt):
+            if not evt.symbol:
+                return  # empty snapshot (no open positions) carries no symbol
             self.counters["private_positions"] += 1
             self.venue_positions[evt.symbol] = {
                 "size": evt.size,
@@ -802,6 +804,8 @@ class Engine:
             self._pending_entries.discard(sig.symbol)
         # The venue holds the bracket stop at `stop`; the local stop mirrors it exactly.
         self._on_entry_result(res, sig, record, sizing, entry, stop, cv, venue_stop=stop)
+        if res.filled and self.reconciler is not None:
+            self._spawn(self._sync_wallet_after_fill())
 
     def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(coro)
@@ -954,6 +958,14 @@ class Engine:
         res = self.gateway.submit(intent, contract_value=pos.contract_value, now_us=int(now * 1e6))
         self._on_exit_result(pos, decision, res, now)
 
+    async def _sync_wallet_after_fill(self) -> None:
+        """A live fill changes the venue balance now; do not wait for the 30 s reconcile cadence."""
+        try:
+            await asyncio.sleep(1.5)  # let the venue settle commission / realised P&L
+            await self.reconciler.reconcile_once()
+        except Exception:
+            log.exception("post_fill_sync_failed")
+
     async def _live_exit(self, pos: Position, intent: OrderIntent, decision: ExitDecision) -> None:
         res = await self.gateway.submit_live(
             intent,
@@ -972,6 +984,8 @@ class Engine:
                 )
             )
         self._on_exit_result(pos, decision, res, time.time())
+        if self.reconciler is not None:
+            self._spawn(self._sync_wallet_after_fill())
 
     def _on_exit_result(
         self, pos: Position, decision: ExitDecision, res: OrderResult, now: float

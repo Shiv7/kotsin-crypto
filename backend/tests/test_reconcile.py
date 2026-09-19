@@ -49,6 +49,12 @@ class FakeWallet:
         self.peak = balance
         self.updated_ts = 0.0
 
+    venue_synced: bool = True
+
+    def rebaseline(self, balance: float, now: float) -> None:
+        self.initial = self.balance = self.peak = self.day_start_balance = balance
+        self.venue_synced = True
+
     def to_json(self) -> dict[str, Any]:
         return {"strategy": self.strategy, "balance": self.balance}
 
